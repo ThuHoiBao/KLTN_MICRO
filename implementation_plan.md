@@ -3,12 +3,20 @@
 
 > **Author**: Senior Solution Architect
 > **Project**: KLTN — Tourism Management System
-> **Backend target**: `D:\KLTN\tourism-microservices-v2` *(brand new project)*
-> **Frontend source**: `D:\KLTN\client-side` *(migrate CRA → Vite, keep all UI/UX)*
 > **Monolith source**: `D:\KLTN\Tourism_Backend` (22 controllers, 23 entities)
 > **Reference doc**: `D:\KLTN\Tourism_Backend\TLCN_FinalReport.docx`
 > **Timeline**: 30 days · 10/04/2026 → 09/05/2026
 > **Development style**: ⚡ **Backend + Frontend Parallel — each week ships both layers**
+
+## 🗂️ 2-Repo Git Strategy
+
+| Repo | Path | Git Remote |
+|------|------|------------|
+| **Backend** | `D:\KLTN\tourism-microservices-v2` | `github.com/YOU/tourism-microservices-v2` |
+| **Frontend** | `D:\KLTN\tourism-frontend-v2` | `github.com/YOU/tourism-frontend-v2` |
+
+> **Rationale**: Separate repos allow independent deploy pipelines — BE to EC2 via docker-compose, FE to Vercel/S3/Nginx independently.
+> Both repos are already initialized with `git init` and first commit on Day 1.
 
 ---
 
@@ -944,13 +952,14 @@ FRONTEND_URL=http://localhost:5173
 
 ## 9. Project Structure
 
-### 9.1 Root Layout
+> ⚡ **2 Separate Git Repos** — backend and frontend deploy independently
+
+### 9.1 Backend Repo — `D:\KLTN\tourism-microservices-v2`
 
 ```
-D:\KLTN\tourism-microservices-v2\
-├── pom.xml                         # Root Maven POM (parent of all modules)
-├── docker-compose.yml              # Full stack (infra + all services)
-├── docker-compose.dev.yml          # Dev overrides (hot-reload mounts)
+tourism-microservices-v2/           ← Git Repo 1: github.com/YOU/tourism-microservices-v2
+├── pom.xml                         # Root Maven POM (parent of all 12 modules)
+├── docker-compose.yml              # Backend infra + all 10 services (NO frontend)
 ├── init-db.sql                     # Creates 10 PostgreSQL databases
 ├── .env / .env.example
 ├── README.md
@@ -973,30 +982,75 @@ D:\KLTN\tourism-microservices-v2\
 │           ├── config/RouteConfig.java
 │           └── client/IamWebClient.java
 │
-├── services/
-│   ├── iam-service/                 # :8090
-│   ├── identity-service/            # :8081
-│   ├── tour-catalog-service/        # :8082
-│   ├── booking-service/             # :8083
-│   ├── payment-service/             # :8084
-│   ├── review-service/              # :8085
-│   ├── promotion-service/           # :8086
-│   ├── notification-service/        # :8087
-│   ├── analytics-service/           # :8088
-│   └── cms-service/                 # :8089
+└── services/
+    ├── iam-service/                 # :8090 ⭐ sole JWT_SECRET holder
+    ├── identity-service/            # :8081
+    ├── tour-catalog-service/        # :8082
+    ├── booking-service/             # :8083
+    ├── payment-service/             # :8084
+    ├── review-service/              # :8085
+    ├── promotion-service/           # :8086
+    ├── notification-service/        # :8087
+    ├── analytics-service/           # :8088
+    └── cms-service/                 # :8089
+```
+
+### 9.2 Frontend Repo — `D:\KLTN\tourism-frontend-v2`
+
+```
+tourism-frontend-v2/                ← Git Repo 2: github.com/YOU/tourism-frontend-v2
+├── package.json
+├── vite.config.ts                  # Proxy: /api → localhost:8080
+├── index.html
+├── .env / .env.example             # VITE_API_URL, VITE_GOOGLE_CLIENT_ID
+├── README.md
 │
-└── frontend/                        # Vite-migrated client-side
-    ├── package.json
-    ├── vite.config.ts
-    ├── index.html
-    └── src/                         # Copied from D:\KLTN\client-side\src\
-        ├── App.tsx                  # keep as-is
-        ├── context/AuthContext.tsx  # UPDATE auth endpoints → IAM
-        ├── utils/axiosInstance.ts   # REWRITE: /iam/auth/refresh-token
-        ├── components/              # keep all 17 component dirs
-        ├── services/                # update dashboard → analytics-service
-        ├── dto/ hook/ data/ assets/ # keep as-is
-        └── services/notification/   # NEW: notificationService.ts
+└── src/
+    ├── main.tsx                    # Entry — GoogleOAuthProvider + AuthProvider
+    ├── App.tsx                     # All routes (kept from client-side)
+    ├── context/AuthContext.tsx  ⚠️  # LOGIN → /iam/auth/login (UPDATED)
+    ├── utils/
+    │   ├── axiosInstance.ts     ⚠️  # Refresh → /iam/auth/refresh-token (UPDATED)
+    │   └── axiosCustomize.js       # Re-exports axiosInstance (backward compat)
+    ├── components/                 # All 17 dirs from client-side — KEEP AS-IS
+    ├── services/
+    │   ├── dashboard/           ⚠️  # Endpoints → /analytics/dashboard/* (UPDATED)
+    │   └── notification/           # NEW: notificationService.ts
+    ├── dto/ hook/ data/ assets/    # Keep as-is
+    └── index.css / App.css         # Keep as-is
+```
+
+### 9.3 How Frontend Calls Backend During Development
+
+```
+┌──────────────────────────┐         ┌──────────────────────────────┐
+│  tourism-frontend-v2     │         │  tourism-microservices-v2    │
+│  npm run dev (:5173)     │         │  docker-compose up           │
+│                          │         │                              │
+│  vite.config.ts proxy:   │         │  API Gateway        :8080    │
+│  /api → localhost:8080 ──┼────────►│  IAM Service        :8090    │
+│                          │         │  Identity Service   :8081    │
+│  CORS: handled by Vite   │         │  Tour Catalog       :8082    │
+│  proxy (no CORS issues)  │         │  ... all services            │
+└──────────────────────────┘         └──────────────────────────────┘
+```
+
+### 9.4 Git Push Commands (after creating remote repos)
+
+**Backend**:
+```bash
+cd D:\KLTN\tourism-microservices-v2
+git remote add origin https://github.com/YOUR_USERNAME/tourism-microservices-v2.git
+git branch -M main
+git push -u origin main
+```
+
+**Frontend**:
+```bash
+cd D:\KLTN\tourism-frontend-v2
+git remote add origin https://github.com/YOUR_USERNAME/tourism-frontend-v2.git
+git branch -M main
+git push -u origin main
 ```
 
 ### 9.2 Standard Service Package Layout
