@@ -1,13 +1,14 @@
 # Tourism Microservices v2 — Master Implementation Plan
 ### From Monolith to Production-Grade Microservices
 
-> **Author**: Senior Solution Architect  
-> **Project**: KLTN — Tourism Management System  
-> **Backend target**: `D:\KLTN\tourism-microservices-v2` *(project mới hoàn toàn)*  
-> **Frontend source**: `D:\KLTN\client-side` *(migrate CRA → Vite, giữ UI/UX)*  
-> **Monolith source**: `D:\KLTN\Tourism_Backend`  
-> **Reference**: `D:\KLTN\Tourism_Backend\TLCN_FinalReport.docx`  
-> **Timeline**: 30 days · Start: 10/04/2026 · Deploy: 09/05/2026
+> **Author**: Senior Solution Architect
+> **Project**: KLTN — Tourism Management System
+> **Backend target**: `D:\KLTN\tourism-microservices-v2` *(brand new project)*
+> **Frontend source**: `D:\KLTN\client-side` *(migrate CRA → Vite, keep all UI/UX)*
+> **Monolith source**: `D:\KLTN\Tourism_Backend` (22 controllers, 23 entities)
+> **Reference doc**: `D:\KLTN\Tourism_Backend\TLCN_FinalReport.docx`
+> **Timeline**: 30 days · 10/04/2026 → 09/05/2026
+> **Development style**: ⚡ **Backend + Frontend Parallel — each week ships both layers**
 
 ---
 
@@ -22,8 +23,8 @@
 7. [Database Decomposition](#7-database-decomposition)
 8. [Infrastructure & External Integrations](#8-infrastructure--external-integrations)
 9. [Project Structure](#9-project-structure)
-10. [30-Day Master Plan](#10-30-day-master-plan)
-11. [Frontend Architecture](#11-frontend-architecture)
+10. [30-Day Parallel Master Plan](#10-30-day-parallel-master-plan)
+11. [Frontend Migration Guide](#11-frontend-migration-guide)
 12. [Deployment Plan](#12-deployment-plan)
 13. [Risk Register](#13-risk-register)
 14. [Completion Checklist](#14-completion-checklist)
@@ -36,22 +37,22 @@
 
 | Pain Point | Evidence in `Tourism_Backend` |
 |-----------|-------------------------------|
-| **God Database** | 23 tables in 1 schema — 1 slow query blocks entire system |
-| **Tight Coupling** | `BookingController` → `PaymentService` → `BookingRepository` directly |
-| **Uniform Scaling** | Want to scale Tour Catalog (high read) but must scale everything |
-| **Risky Deploy** | Fix 1 bug in Review → redeploy 200K+ lines affecting Payment |
-| **Scattered Auth** | Every controller re-parses JWT independently, no central control |
+| **God Database** | 23 tables in 1 schema — 1 slow query locks entire system |
+| **Tight Coupling** | `PaymentController` → `BookingService` → `BookingRepository` in same JVM |
+| **Uniform Scaling** | Can't scale Tour Catalog (high read) independently from Payment |
+| **Risky Deploy** | Fix 1 bug in Review → redeploy 200K+ lines including Payment |
+| **Scattered Auth** | Every controller re-parses JWT independently, no central revocation |
 | **No Domain Isolation** | `Booking` entity has direct FK to `User`, `Tour`, `Coupon`, `Payment` simultaneously |
 
-### 1.2 Monolith Controller → Service Mapping
+### 1.2 Controller → Microservice Mapping
 
 ```
-Tourism_Backend Controllers (22 total)
+Tourism_Backend/controller/ (22 controllers)
 │
-├── Auth & Identity Domain
-│   ├── AuthController.java             → identity-service
-│   ├── AdminAuthController.java        → identity-service
-│   ├── AdminProfileController.java     → identity-service
+├── Identity Domain
+│   ├── AuthController.java              → iam-service  (login/logout/refresh)
+│   ├── AdminAuthController.java         → identity-service
+│   ├── AdminProfileController.java      → identity-service
 │   └── UserController.java             → identity-service
 │
 ├── Tour Domain
@@ -79,7 +80,7 @@ Tourism_Backend Controllers (22 total)
 ├── Notification Domain
 │   └── NotificationController.java     → notification-service
 │
-├── Analytics Domain
+├── Analytics & AI Domain
 │   ├── DashboardController.java        → analytics-service
 │   └── ChatbotController.java          → analytics-service
 │
@@ -88,135 +89,122 @@ Tourism_Backend Controllers (22 total)
     └── BranchContactController.java    → cms-service
 ```
 
-### 1.3 Entity Distribution Plan
+### 1.3 Entity Distribution
 
-| Monolith Entity | Migrates To | Notes |
-|----------------|-------------|-------|
-| `User` | `tourism_identity` | Identity source of truth |
-| `RefreshToken` | `tourism_iam` | Moved to IAM service |
-| `Tour`, `TourImage`, `TourMedia` | `tourism_catalog` | |
-| `TourDeparture`, `DeparturePricing`, `DepartureTransport` | `tourism_catalog` | |
-| `ItineraryDay`, `Location`, `FavoriteTour` | `tourism_catalog` | |
-| `Booking`, `BookingPassenger`, `RefundInformation` | `tourism_booking` | |
-| `Payment` | `tourism_payment` | |
-| `Review`, `ImageReview` | `tourism_review` | |
-| `Coupon` | `tourism_promotion` | |
-| `Notification`, `UserNotification` | `tourism_notification` | |
-| `PolicyTemplate`, `BranchContact` | `tourism_cms` | |
-| *(new)* `DailyStats`, `TourStats` | `tourism_analytics` | Aggregated, no raw data |
-| *(new)* `TokenBlacklist` | `tourism_iam` | Centralized token management |
+| Monolith Entity | Microservice DB | Migration Notes |
+|----------------|-----------------|-----------------|
+| `User` | `tourism_identity` | Source of truth for user identity |
+| `RefreshToken` | `tourism_iam` | **Moved to IAM** (centralized token mgmt) |
+| `Tour`, `TourImage`, `TourMedia` | `tourism_catalog` | All tour metadata + Cloudinary URLs |
+| `TourDeparture`, `DeparturePricing`, `DepartureTransport` | `tourism_catalog` | Departure schedules + pricing tiers |
+| `ItineraryDay`, `Location`, `FavoriteTour` | `tourism_catalog` | Itinerary + destinations |
+| `Booking`, `BookingPassenger`, `RefundInformation` | `tourism_booking` | Booking lifecycle |
+| `Payment` | `tourism_payment` | Payment records per gateway |
+| `Review`, `ImageReview` | `tourism_review` | User reviews + Cloudinary images |
+| `Coupon` | `tourism_promotion` | Discount codes |
+| `Notification`, `UserNotification` | `tourism_notification` | In-app notifications |
+| `PolicyTemplate`, `BranchContact` | `tourism_cms` | Content management |
+| *(new)* `DailyStats`, `TourStats` | `tourism_analytics` | Aggregated KPI (no raw data) |
+| *(new)* `TokenBlacklist` | `tourism_iam` | Centralized logout/revocation |
 
 ---
 
 ## 2. Architecture Decision: IAM Service
 
-### 2.1 The Problem with `common-security` Shared Library
-
-In `tourism-microservices` (v1), every service imports `common-security.jar`:
+### 2.1 Problem with `common-security` Shared Library (v1 approach)
 
 ```
-❌ Old approach (Shared Library):
-  booking-service → imports common-security.jar → parses JWT itself
-  payment-service → imports common-security.jar → parses JWT itself
-  review-service  → imports common-security.jar → parses JWT itself
-  
-  Problems:
-  • JWT_SECRET must be distributed to ALL services (security risk)
-  • Token blacklist (logout) is impossible without shared state
-  • Updating JWT library requires rebuilding ALL services
-  • No central control over token lifecycle
+❌ OLD (tourism-microservices v1):
+   Every service imports common-security.jar → parses JWT itself
+
+   booking-service  → reads JWT_SECRET → validates token
+   payment-service  → reads JWT_SECRET → validates token
+   review-service   → reads JWT_SECRET → validates token
+
+   Problems:
+   ① JWT_SECRET distributed to ALL services (severe security risk)
+   ② Token blacklist (logout) impossible without shared state
+   ③ Update JWT library → rebuild ALL services simultaneously
+   ④ No central audit log of token lifecycle
 ```
 
-### 2.2 The Solution: IAM Service as Central Authority
+### 2.2 Solution: IAM Service as Sole Token Authority
 
 ```
-✅ New approach (IAM Service):
-  ALL services receive: X-User-Id, X-User-Email, X-User-Role headers
-  ONLY IAM Service knows: JWT_SECRET, token blacklist
+✅ NEW (tourism-microservices v2):
+   JWT_SECRET exists ONLY in: iam-service + api-gateway
+   All downstream services: read X-User-* headers, zero JWT parsing
 
-  JWT_SECRET  →  only in iam-service + api-gateway
-  All others  →  read X-User-* headers, no JWT parsing at all
+   iam-service     → issues tokens, verifies tokens, manages blacklist
+   api-gateway     → calls IAM for every protected request, injects headers
+   booking-service → reads X-User-Id header only (no JWT dependency)
+   payment-service → reads X-User-Id header only
+   review-service  → reads X-User-Id header only
 ```
 
-### 2.3 Token Verification Flow
+### 2.3 Complete Authentication Flow
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                    COMPLETE AUTHENTICATION FLOW                           │
-│                                                                          │
-│  Step 1: Login                                                           │
-│  ─────────────────────────────────────────────────────────────────────  │
+│  STEP 1: LOGIN                                                           │
 │  Client → POST /api/iam/auth/login { email, password }                  │
-│         → API Gateway (public route, skip JWT check)                    │
+│         → API Gateway (public route, bypass JWT check)                  │
 │         → IAM Service:                                                   │
-│              Feign ──► identity-service POST /internal/users/auth        │
-│              ◄── { userId, email, role, status }                         │
-│              generate accessToken (JWT, 15min, contains jti=UUID)        │
-│              generate refreshToken (opaque random, SHA256 stored)        │
-│              save to refresh_tokens table                                │
-│         ◄── { accessToken, refreshToken, user }                          │
+│              Feign → identity-service POST /internal/users/authenticate  │
+│              ← { userId, email, role, status }                           │
+│              IF status=LOCKED → 403 Forbidden                           │
+│              Generate accessToken: JWT(sub=userId, jti=UUID, exp=15min) │
+│              Generate refreshToken: SecureRandom → Base64url → SHA256   │
+│              Save SHA256(refreshToken) → refresh_tokens table           │
+│         ← 200 { accessToken, refreshToken, user }                       │
 │                                                                          │
-│  Step 2: Authenticated Request                                           │
-│  ─────────────────────────────────────────────────────────────────────  │
-│  Client → GET /api/bookings/my                                           │
-│           [Authorization: Bearer <accessToken>]                          │
-│         → API Gateway JwtAuthGatewayFilter:                              │
-│              Is public path? → YES: forward as-is                        │
-│                               NO: POST /internal/iam/verify { token }   │
-│                                   → IAM Service:                         │
-│                                       parse JWT                          │
-│                                       check token_blacklist              │
-│                                       ← { valid, userId, email, role }   │
-│              inject headers:                                             │
-│                X-User-Id: 42                                             │
-│                X-User-Email: user@example.com                            │
-│                X-User-Role: USER                                         │
-│          → booking-service:                                              │
-│              HeaderAuthFilter reads X-User-* headers                     │
-│              sets SecurityContext (NO JWT parsing)                       │
-│              @PreAuthorize("hasRole('ADMIN')") works normally            │
+│  STEP 2: AUTHENTICATED REQUEST                                           │
+│  Client → GET /api/bookings/my [Authorization: Bearer <accessToken>]    │
+│         → API Gateway JwtAuthGatewayFilter:                             │
+│              Is public path?  YES → forward as-is                       │
+│                               NO  → POST /internal/iam/verify {token}  │
+│                                     ← { valid, userId, email, role }    │
+│              Caffeine cache (TTL=60s): skip IAM call on cache hit       │
+│              Inject headers:                                             │
+│                X-User-Id:    42                                          │
+│                X-User-Email: user@example.com                           │
+│                X-User-Role:  USER                                        │
+│         → booking-service:                                              │
+│              HeaderAuthFilter reads X-User-* → sets SecurityContext     │
+│              (NO JWT library, NO JWT_SECRET here)                       │
 │                                                                          │
-│  Step 3: Logout                                                          │
-│  ─────────────────────────────────────────────────────────────────────  │
-│  Client → POST /api/iam/auth/logout [Authorization: Bearer token]        │
+│  STEP 3: LOGOUT                                                          │
+│  Client → POST /api/iam/auth/logout [Bearer token]                      │
 │         → IAM Service:                                                   │
-│              extract jti from token                                      │
-│              INSERT INTO token_blacklist (jti, expires_at)               │
-│              cache in Redis (key=jti, TTL=remaining token lifetime)      │
-│         ← 200 OK                                                         │
-│  Next request with same token → IAM returns { valid: false } → 401       │
+│              Extract jti claim from token                               │
+│              Redis SET jti "" EX <remaining_seconds>   (fast check)     │
+│              INSERT INTO token_blacklist (jti, expires_at)              │
+│         ← 200 OK                                                        │
+│  Next request with same token → IAM: jti in Redis → { valid: false }   │
+│         → Gateway returns 401 Unauthorized                              │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.4 Gateway Token Caching (Performance)
-
-```
-To prevent IAM becoming a bottleneck:
-  API Gateway → Caffeine local cache (key=token, TTL=60s, max=10,000)
-  Cache Hit  → skip IAM call → inject headers directly
-  Cache Miss → POST /internal/iam/verify → cache result
-
-  Result: ~90% cache hit rate at steady state
-  Logout propagation: max 60s delay (acceptable for KLTN)
-```
-
-### 2.5 HeaderAuthFilter — Per-Service (~30 lines, no JWT library)
+### 2.4 HeaderAuthFilter — Downstream Services (~30 lines, NO JWT library)
 
 ```java
-// Each downstream service has this filter — NO jjwt dependency needed
+// Copy to every downstream service — replaces common-security entirely
 public class HeaderAuthFilter extends OncePerRequestFilter {
+
     @Override
     protected void doFilterInternal(HttpServletRequest req,
                                     HttpServletResponse res,
-                                    FilterChain chain) throws ServletException, IOException {
+                                    FilterChain chain)
+            throws ServletException, IOException {
+
         String userId = req.getHeader("X-User-Id");
         String email  = req.getHeader("X-User-Email");
         String role   = req.getHeader("X-User-Role");
 
         if (userId != null && role != null) {
+            var principal = new UserPrincipal(Long.parseLong(userId), email, role);
             var auth = new UsernamePasswordAuthenticationToken(
-                new UserPrincipal(Long.parseLong(userId), email, role),
-                null,
+                principal, null,
                 List.of(new SimpleGrantedAuthority("ROLE_" + role))
             );
             SecurityContextHolder.getContext().setAuthentication(auth);
@@ -224,162 +212,167 @@ public class HeaderAuthFilter extends OncePerRequestFilter {
         chain.doFilter(req, res);
     }
 }
+
+// UserPrincipal — simple record, no JWT imports
+public record UserPrincipal(Long userId, String email, String role) {}
+```
+
+### 2.5 Gateway Caffeine Cache (Performance)
+
+```yaml
+# Prevents IAM from becoming a performance bottleneck
+# api-gateway/src/main/resources/application.yml
+gateway:
+  token-cache:
+    max-size: 10000      # max 10K concurrent tokens
+    ttl-seconds: 60      # cache for 60 seconds
+    # Result: ~90% cache hit rate at steady-state
+    # Logout propagation delay: max 60s (acceptable for KLTN)
 ```
 
 ---
 
 ## 3. System Architecture
 
-### 3.1 Service Topology
+### 3.1 Full System Topology
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                   REACT FRONTEND  (:5173 dev / :80 prod)           │
-│         All HTTP calls → http://localhost:8080 (API Gateway)        │
-└─────────────────────────────────┬───────────────────────────────────┘
-                                  │
-                    ┌─────────────▼─────────────┐
-                    │      API GATEWAY :8080      │
-                    │   Spring Cloud Gateway      │
-                    │                            │
-                    │  JwtAuthGatewayFilter:      │
-                    │  IF protected route:        │
-                    │    POST /internal/iam/verify│──► IAM :8090
-                    │    inject X-User-* headers  │
-                    │  Route table → services     │
-                    └─────────────┬───────────────┘
-                                  │
-     ┌────────┬────────┬──────────┼──────────┬────────┬────────┐
-     │        │        │          │          │        │        │
-  :8090    :8081    :8082      :8083      :8084    :8085    :8086
-   IAM   identity  tour-cat  booking   payment  review   promo
-     │        │        │          │          │        │        │
-     │        │        │          │          │        │        │
-  tourism_ tourism_ tourism_ tourism_ tourism_ tourism_ tourism_
-    iam   identity  catalog  booking  payment  review  promotion
-
-                    │
-     ┌──────────────┼──────────────┐
-     │              │              │
-  :8087          :8088          :8089
- notif          analytics        cms
-     │              │              │
- tourism_      tourism_       tourism_
-notification  analytics        cms
-
-                    │
-          ┌─────────┴─────────┐
-          │  Apache Kafka     │ (Async Event Bus)
-          │  6 Topics         │
-          └───────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│   React Frontend  :5173 (dev) / :80 (prod)                              │
+│   D:\KLTN\client-side  →  migrate to Vite, keep all UI components       │
+│   All API calls → http://localhost:8080 (single Gateway endpoint)       │
+└──────────────────────────────────┬───────────────────────────────────────┘
+                                   │ HTTP
+                    ┌──────────────▼──────────────┐
+                    │     API GATEWAY  :8080        │
+                    │  Spring Cloud Gateway        │
+                    │                              │
+                    │  JwtAuthGatewayFilter:       │
+                    │  ① Check public-paths list   │
+                    │  ② Check Caffeine cache      │
+                    │  ③ POST /internal/iam/verify │──────► IAM :8090
+                    │  ④ Cache result (TTL=60s)    │
+                    │  ⑤ Inject X-User-* headers   │
+                    └──────────────┬───────────────┘
+                                   │ Route by path
+         ┌─────────┬───────────────┼──────────────┬──────────┬──────────┐
+         │         │               │              │          │          │
+      :8090     :8081           :8082          :8083      :8084      :8085
+    iam-svc  identity         tour-cat        booking    payment    review
+         │         │               │              │          │          │
+    [iam_db] [identity_db]   [catalog_db]   [booking_db] [pay_db] [review_db]
+         │
+         ├──────────────────────────────────────────────────────────┐
+         │              │              │              │              │
+      :8086          :8087          :8088          :8089   (Eureka :8761)
+    promotion      notif          analytics         cms
+         │              │              │              │
+    [promo_db]  [notif_db]      [analyt_db]      [cms_db]
+                    │              │
+                    └──────┬───────┘
+                    Apache Kafka :9092
+                    6 Topics / 5 Consumer Groups
 ```
 
 ### 3.2 Service Catalogue
 
-| # | Service | Port | Database | Role |
-|---|---------|------|----------|------|
-| — | `service-registry` (Eureka) | **8761** | — | Service discovery |
-| — | `api-gateway` | **8080** | — | Single entry point + JWT filter |
-| 0 | `iam-service` ⭐ | **8090** | `tourism_iam` | Token issuer, verifier, blacklist |
+| # | Service | Port | Database | Key Capabilities |
+|---|---------|------|----------|-----------------|
+| – | `service-registry` (Eureka) | **8761** | — | Service discovery |
+| – | `api-gateway` | **8080** | — | JWT filter, routing, CORS, rate-limit |
+| 0 | `iam-service` ⭐ | **8090** | `tourism_iam` | Token issue/verify/blacklist, refresh rotation |
 | 1 | `identity-service` | **8081** | `tourism_identity` | User CRUD, email verify, Google OAuth |
 | 2 | `tour-catalog-service` | **8082** | `tourism_catalog` | Tours, departures, locations, favorites |
-| 3 | `booking-service` | **8083** | `tourism_booking` | Booking lifecycle |
+| 3 | `booking-service` | **8083** | `tourism_booking` | Booking lifecycle, Redis cache |
 | 4 | `payment-service` | **8084** | `tourism_payment` | VNPay, PayOS, SePay |
-| 5 | `review-service` | **8085** | `tourism_review` | Reviews + ratings |
-| 6 | `promotion-service` | **8086** | `tourism_promotion` | Coupons |
-| 7 | `notification-service` | **8087** | `tourism_notification` | Email + in-app |
-| 8 | `analytics-service` | **8088** | `tourism_analytics` | Dashboard + AI chatbot |
-| 9 | `cms-service` | **8089** | `tourism_cms` | Policy + branch content |
+| 5 | `review-service` | **8085** | `tourism_review` | Reviews, ratings, Cloudinary images |
+| 6 | `promotion-service` | **8086** | `tourism_promotion` | Coupon CRUD + atomic apply |
+| 7 | `notification-service` | **8087** | `tourism_notification` | Email (JavaMail) + in-app |
+| 8 | `analytics-service` | **8088** | `tourism_analytics` | KPI dashboard, Gemini AI chatbot |
+| 9 | `cms-service` | **8089** | `tourism_cms` | Policies, branch contacts |
 
 ### 3.3 API Gateway Route Table
 
 ```yaml
-# api-gateway/src/main/resources/application.yml
+# infrastructure/api-gateway/src/main/resources/application.yml
 
-spring.cloud.gateway.routes:
-  # IAM (auth token management)
-  - id: iam-auth
-    uri: lb://iam-service
-    predicates:
-      - Path=/api/iam/**
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: iam-service
+          uri: lb://iam-service
+          predicates: [Path=/api/iam/**]
 
-  # Identity (user management)
-  - id: identity-auth
-    uri: lb://identity-service
-    predicates:
-      - Path=/api/auth/register, /api/auth/verify-email,
-              /api/auth/resend-verification, /api/auth/google/login
-  - id: identity-users
-    uri: lb://identity-service
-    predicates:
-      - Path=/api/users/**, /api/admin/users/**
+        - id: identity-auth
+          uri: lb://identity-service
+          predicates: [Path=/api/auth/register,/api/auth/verify-email,/api/auth/resend-verification,/api/auth/google/login,/api/auth/profile]
 
-  # Tour Catalog
-  - id: tour-catalog
-    uri: lb://tour-catalog-service
-    predicates:
-      - Path=/api/tours/**, /api/locations/**, /api/admin/tours/**,
-              /api/admin/departures/**, /api/admin/locations/**
+        - id: identity-users
+          uri: lb://identity-service
+          predicates: [Path=/api/users/**,/api/admin/users/**]
 
-  # Booking
-  - id: booking
-    uri: lb://booking-service
-    predicates:
-      - Path=/api/bookings/**, /api/admin/bookings/**
+        - id: tour-catalog
+          uri: lb://tour-catalog-service
+          predicates: [Path=/api/tours/**,/api/locations/**,/api/admin/tours/**,/api/admin/departures/**,/api/admin/locations/**]
 
-  # Payment
-  - id: payment
-    uri: lb://payment-service
-    predicates:
-      - Path=/api/payments/**
+        - id: booking
+          uri: lb://booking-service
+          predicates: [Path=/api/bookings/**,/api/admin/bookings/**]
 
-  # Review
-  - id: review
-    uri: lb://review-service
-    predicates:
-      - Path=/api/reviews/**, /api/admin/reviews/**
+        - id: payment
+          uri: lb://payment-service
+          predicates: [Path=/api/payments/**]
 
-  # Promotion
-  - id: promotion
-    uri: lb://promotion-service
-    predicates:
-      - Path=/api/promotions/**, /api/admin/coupons/**
+        - id: review
+          uri: lb://review-service
+          predicates: [Path=/api/reviews/**,/api/admin/reviews/**]
 
-  # Notification
-  - id: notification
-    uri: lb://notification-service
-    predicates:
-      - Path=/api/notifications/**
+        - id: promotion
+          uri: lb://promotion-service
+          predicates: [Path=/api/promotions/**,/api/admin/coupons/**]
 
-  # Analytics
-  - id: analytics
-    uri: lb://analytics-service
-    predicates:
-      - Path=/api/analytics/**
+        - id: notification
+          uri: lb://notification-service
+          predicates: [Path=/api/notifications/**]
 
-  # CMS
-  - id: cms
-    uri: lb://cms-service
-    predicates:
-      - Path=/api/cms/**
+        - id: analytics
+          uri: lb://analytics-service
+          predicates: [Path=/api/analytics/**]
 
-# Public paths — skip JWT verification
-gateway.public-paths:
-  - /api/iam/auth/login
-  - /api/iam/auth/refresh-token
-  - /api/auth/register
-  - /api/auth/verify-email
-  - /api/auth/resend-verification
-  - /api/auth/google/login
-  - GET:/api/tours/**
-  - GET:/api/reviews/**
-  - GET:/api/cms/**
-  - GET:/api/locations/**
-  - /api/payments/vnpay-return
-  - /api/payments/payos-webhook
-  - /api/payments/payos/return
-  - /api/payments/payos/cancel
-  - /api/payments/sepay-webhook
+        - id: cms
+          uri: lb://cms-service
+          predicates: [Path=/api/cms/**]
+
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins:
+              - http://localhost:5173
+              - http://localhost:3000
+              - https://tourism-kltn.yourdomain.com
+            allowedMethods: [GET,POST,PUT,PATCH,DELETE,OPTIONS]
+            allowedHeaders: ["*"]
+            allowCredentials: true
+
+# Public paths — bypass JWT verification
+gateway:
+  public-paths:
+    - /api/iam/auth/login
+    - /api/iam/auth/refresh-token
+    - /api/auth/register
+    - /api/auth/verify-email
+    - /api/auth/resend-verification
+    - /api/auth/google/login
+    - GET:/api/tours/**
+    - GET:/api/reviews/**
+    - GET:/api/cms/**
+    - GET:/api/locations/**
+    - /api/payments/vnpay-return
+    - /api/payments/payos-webhook
+    - /api/payments/payos/return
+    - /api/payments/payos/cancel
+    - /api/payments/sepay-webhook
 ```
 
 ---
@@ -388,148 +381,119 @@ gateway.public-paths:
 
 ---
 
-### 4.0 IAM Service `:8090` — ⭐ NEW SERVICE
+### 4.0 IAM Service `:8090` ⭐ NEW
 
-**Database**: `tourism_iam`  
-**Tables**: `refresh_tokens`, `token_blacklist`  
-**Feign**: → identity-service `/internal/users/authenticate`  
-**Redis**: Blacklist cache (key=jti, TTL=token remaining lifetime)
+**DB**: `tourism_iam` | **Tables**: `refresh_tokens`, `token_blacklist`
+**Feign out**: → `identity-service /internal/users/authenticate`
+**Redis**: Blacklist cache key=jti, TTL=remaining token lifetime
 
-#### Public Auth Endpoints (via Gateway)
+#### Public Endpoints (via API Gateway)
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/api/iam/auth/login` | Public | Login → return `{ accessToken, refreshToken, user }` |
-| `POST` | `/api/iam/auth/refresh-token` | Public | Refresh → rotate tokens |
-| `POST` | `/api/iam/auth/logout` | Bearer | Blacklist current access token |
-| `POST` | `/api/iam/auth/logout-all` | Bearer | Revoke all refresh tokens for user |
+| `POST` | `/api/iam/auth/login` | Public | Email+password → `{ accessToken, refreshToken, user }` |
+| `POST` | `/api/iam/auth/refresh-token` | Public | Rotate token pair |
+| `POST` | `/api/iam/auth/logout` | Bearer | Blacklist current jti |
+| `POST` | `/api/iam/auth/logout-all` | Bearer | Revoke all refresh tokens for userId |
 
-#### Internal Endpoints (Gateway → IAM only, not routed externally)
+#### Internal Endpoints (Gateway/Identity → IAM only)
 
 | Method | Path | Caller | Description |
 |--------|------|--------|-------------|
-| `POST` | `/internal/iam/verify` | api-gateway | Verify token, return `{ valid, userId, email, role }` |
-| `POST` | `/internal/iam/issue` | identity-service | Issue tokens after register/Google login |
+| `POST` | `/internal/iam/verify` | api-gateway | `{ valid, userId, email, role }` |
+| `POST` | `/internal/iam/issue` | identity-service | Issue tokens post-register/Google |
 
 **DB Schema**:
 ```sql
 -- tourism_iam
-
 CREATE TABLE refresh_tokens (
-    id           BIGSERIAL PRIMARY KEY,
-    user_id      BIGINT NOT NULL,
-    token_hash   VARCHAR(64) NOT NULL UNIQUE,   -- SHA-256 of raw token
-    expires_at   TIMESTAMP NOT NULL,
-    revoked      BOOLEAN DEFAULT FALSE,
-    device_info  VARCHAR(255),
-    created_at   TIMESTAMP DEFAULT NOW()
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL,
+    token_hash  VARCHAR(64) UNIQUE NOT NULL,  -- SHA-256(rawToken)
+    expires_at  TIMESTAMP NOT NULL,
+    revoked     BOOLEAN DEFAULT FALSE,
+    device_info VARCHAR(255),
+    created_at  TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX idx_rt_user_id ON refresh_tokens(user_id);
 
 CREATE TABLE token_blacklist (
-    jti          VARCHAR(36) PRIMARY KEY,        -- JWT "jti" claim (UUID)
-    expires_at   TIMESTAMP NOT NULL,             -- For scheduled cleanup
+    jti            VARCHAR(36) PRIMARY KEY,   -- JWT "jti" UUID claim
+    expires_at     TIMESTAMP NOT NULL,
     blacklisted_at TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX idx_bl_expires ON token_blacklist(expires_at);
-```
-
-**Login Flow**:
-```
-POST /api/iam/auth/login { email, password }
-  1. Feign → identity-service POST /internal/users/authenticate
-  2. ← { userId, email, role, status }
-  3. IF status == LOCKED → throw 403
-  4. Generate accessToken: JWT(sub=userId, email, role, jti=UUID, exp=15min)
-  5. Generate refreshToken: SecureRandom(32 bytes) → Base64
-  6. Store SHA256(refreshToken) in refresh_tokens table
-  7. Return { accessToken, refreshToken, expiresIn: 900 }
 ```
 
 ---
 
 ### 4.1 Identity Service `:8081`
 
-**Database**: `tourism_identity`  
-**Tables**: `users`, `email_verifications`  
-**Dependencies**: Cloudinary, JavaMail, Google OAuth2  
+**DB**: `tourism_identity` | **Tables**: `users`, `email_verifications`
+**External**: Cloudinary (avatar), JavaMail (verify email), google-api-client (OAuth2)
 **Kafka Producer**: `user.registered`
+**Changed vs v1**: Removed JWT generation, removed RefreshToken table → all auth in IAM
 
-> ⚠️ **Changed from v1**: Removed `RefreshToken` table (moved to IAM). Removed JWT generation. Added internal endpoints for IAM to call.
-
-#### Auth Endpoints
-
-| Method | Path | Auth | Monolith Source | Description |
-|--------|------|------|-----------------|-------------|
-| `POST` | `/api/auth/register` | Public | `AuthController.register()` | Validate → save user → Feign IAM issue token → return tokens + user |
-| `GET` | `/api/auth/verify-email` | Public | `AuthController.verifyEmail()` | Activate account via UUID token link |
-| `POST` | `/api/auth/resend-verification` | Public | `AuthController.resendVerification()` | Rate-limited resend |
-| `POST` | `/api/auth/google/login` | Public | `AuthController.googleLogin()` | Google ID Token → findOrCreate → Feign IAM issue token |
-| `GET` | `/api/auth/profile` | USER | `AuthController.getMyProfile()` | Return user from `X-User-Id` header |
-
-#### User Endpoints
+#### Public Auth
 
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
-| `GET` | `/api/users/{id}` | USER | `UserController.getUserById()` | Get user by ID |
-| `PATCH` | `/api/users/{id}/profile` | USER | `UserController.updateProfile()` | Update name/phone/dob/address + avatar (Cloudinary multipart) |
-| `PATCH` | `/api/users/{id}/change-password` | USER | `UserController.changePassword()` | Verify old BCrypt → set new |
+| `POST` | `/api/auth/register` | Public | `AuthController.register()` | BCrypt → save → email verify → Feign IAM issue → return tokens |
+| `GET` | `/api/auth/verify-email?token=` | Public | `AuthController.verifyEmail()` | Activate account via UUID link |
+| `POST` | `/api/auth/resend-verification` | Public | `AuthController.resendVerification()` | Rate-limited email resend |
+| `POST` | `/api/auth/google/login` | Public | `AuthController.googleLogin()` | Google ID Token → findOrCreate → Feign IAM issue |
+| `GET` | `/api/auth/profile` | USER | `AuthController.getMyProfile()` | Reads X-User-Id header |
 
-#### Admin Endpoints
+#### User Management
+
+| Method | Path | Auth | Monolith Source | Description |
+|--------|------|------|-----------------|-------------|
+| `GET` | `/api/users/{id}` | USER | `UserController.getUserById()` | Get user profile |
+| `PATCH` | `/api/users/{id}/profile` | USER | `UserController.updateProfile()` | multipart: fullName, phone, dob, address, avatar → Cloudinary |
+| `PATCH` | `/api/users/{id}/change-password` | USER | `UserController.changePassword()` | Verify BCrypt → set new |
+
+#### Admin
 
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
 | `GET` | `/api/admin/users` | ADMIN | `AdminAuthController` | Paginated user list |
-| `POST` | `/api/admin/users/search` | ADMIN | `UserController.searchUsers()` | Filter by keyword, role, status |
+| `POST` | `/api/admin/users/search` | ADMIN | `UserController` | Filter by keyword/role/status |
 | `PATCH` | `/api/admin/users/{id}/status` | ADMIN | `AdminAuthController` | Lock / unlock account |
 
-#### Internal Endpoints (called by IAM Service)
+#### Internal (called by IAM)
 
 | Method | Path | Caller | Description |
 |--------|------|--------|-------------|
-| `POST` | `/internal/users/authenticate` | iam-service | Verify email+password → return user info |
-| `GET` | `/internal/users/{id}/info` | iam-service | Get user info for token enrichment |
-
-**Register Flow**:
-```
-POST /api/auth/register { email, password, fullName }
-  1. Validate email not taken
-  2. BCrypt hash password → save User { status: PENDING_VERIFICATION }
-  3. Generate email verification UUID (24h TTL) → send email (JavaMail)
-  4. Kafka publish: user.registered
-  5. Feign → IAM POST /internal/iam/issue { userId, email, role }
-  6. ← { accessToken, refreshToken }
-  7. Return 201 { accessToken, refreshToken, user }
-```
+| `POST` | `/internal/users/authenticate` | iam-service | Verify email+BCrypt → return user info |
+| `GET` | `/internal/users/{id}/info` | iam-service | Token enrichment payload |
 
 ---
 
 ### 4.2 Tour Catalog Service `:8082`
 
-**Database**: `tourism_catalog`  
-**Tables**: `tours`, `tour_images`, `tour_departures`, `departure_pricings`, `departure_transports`, `itinerary_days`, `locations`, `favorite_tours`  
-**Dependencies**: Cloudinary
+**DB**: `tourism_catalog` | 8 tables
+**External**: Cloudinary (tour images)
 
-#### Public Endpoints
+#### Public
 
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
-| `GET` | `/api/tours` | Public | `TourController.getAllTours()` | Paginated list, filter: `region`, `location`, `keyword`, `priceFrom`, `priceTo` |
+| `GET` | `/api/tours` | Public | `TourController.getAllTours()` | Paginated + filter: region, location, keyword, priceFrom, priceTo |
 | `GET` | `/api/tours/search` | Public | `TourController.searchTours()` | Full-text search |
-| `GET` | `/api/tours/featured` | Public | `TourController.getTop10DeepestDiscountTours()` | Featured/most discounted tours |
-| `GET` | `/api/tours/code/{code}` | Public | `TourController.getTourDetail()` | Tour detail by code (slug) |
-| `GET` | `/api/tours/{id}` | Public | `TourController.getTourDetail()` | Tour detail by ID |
-| `GET` | `/api/tours/{id}/related` | Public | `TourController.getRelatedTours()` | Tours in same region/location |
+| `GET` | `/api/tours/featured` | Public | `TourController.getTop10DeepestDiscountTours()` | Best discount tours |
+| `GET` | `/api/tours/code/{code}` | Public | `TourController.getTourDetail()` | Detail by slug/code |
+| `GET` | `/api/tours/{id}` | Public | `TourController.getTourDetail()` | Detail by ID |
+| `GET` | `/api/tours/{id}/related` | Public | `TourController.getRelatedTours()` | Same region tours |
 | `GET` | `/api/tours/{id}/departures` | Public | `TourController.getTourDepartures()` | All departure schedules |
-| `GET` | `/api/tours/{id}/departures/available` | Public | *(NEW)* | Departures with `available_slots > 0` |
-| `GET` | `/api/locations` | Public | `LocationController.getLocations()` | All locations (for filter dropdown) |
+| `GET` | `/api/tours/{id}/departures/available` | Public | *(NEW)* | Departures with slots > 0 |
+| `GET` | `/api/locations` | Public | `LocationController.getLocations()` | All destinations |
 | `GET` | `/api/locations/{id}` | Public | `LocationController.getById()` | Location detail |
 
-#### Authenticated User Endpoints
+#### Authenticated User
 
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
-| `POST` | `/api/tours/favorites` | USER | `FavoriteTourController.addFavoriteTour()` | Add tour to favorites |
+| `POST` | `/api/tours/favorites` | USER | `FavoriteTourController.addFavoriteTour()` | Add to favorites |
 | `DELETE` | `/api/tours/favorites/{tourId}` | USER | `FavoriteTourController.removeFavoriteTour()` | Remove from favorites |
 | `GET` | `/api/tours/favorites/my` | USER | `FavoriteTourController.getUserFavoriteTours()` | My favorites list |
 
@@ -538,31 +502,31 @@ POST /api/auth/register { email, password, fullName }
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
 | `GET` | `/api/admin/tours` | ADMIN | `TourManagementController.getAllTours()` | All tours for admin table |
-| `POST` | `/api/admin/tours` | ADMIN | `TourManagementController.createTour()` | Create tour + itinerary |
+| `POST` | `/api/admin/tours` | ADMIN | `TourManagementController.createTour()` | Create + itinerary |
 | `PUT` | `/api/admin/tours/{id}` | ADMIN | `TourManagementController.updateTour()` | Full update |
-| `PUT` | `/api/admin/tours/{id}/general-info` | ADMIN | `TourManagementController.updateGeneralInfo()` | Update basic info |
-| `PUT` | `/api/admin/tours/{id}/itinerary` | ADMIN | `TourManagementController.updateItinerary()` | Update day-by-day itinerary |
-| `PATCH` | `/api/admin/tours/{id}/status` | ADMIN | `TourManagementController.updateStatus()` | Active / Inactive |
+| `PUT` | `/api/admin/tours/{id}/general-info` | ADMIN | `TourManagementController.updateGeneralInfo()` | Basic info |
+| `PUT` | `/api/admin/tours/{id}/itinerary` | ADMIN | `TourManagementController.updateItinerary()` | Day-by-day plan |
+| `PATCH` | `/api/admin/tours/{id}/status` | ADMIN | `TourManagementController.updateStatus()` | Active/Inactive |
 | `DELETE` | `/api/admin/tours/{id}` | ADMIN | `TourManagementController.deleteTour()` | Soft delete |
 | `POST` | `/api/admin/tours/{id}/thumbnail` | ADMIN | `TourMediaController` | Upload thumbnail → Cloudinary |
-| `POST` | `/api/admin/tours/{id}/images` | ADMIN | `TourUploadController` | Upload multiple gallery images |
+| `POST` | `/api/admin/tours/{id}/images` | ADMIN | `TourUploadController` | Upload gallery images |
 
 #### Admin Departure Management
 
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
-| `POST` | `/api/admin/departures` | ADMIN | `TourDepartureManagementController.createDeparture()` | Add departure schedule |
+| `POST` | `/api/admin/departures` | ADMIN | `TourDepartureManagementController.createDeparture()` | New departure |
 | `PUT` | `/api/admin/departures/{id}` | ADMIN | `TourDepartureManagementController.updateDeparture()` | Update departure |
-| `PUT` | `/api/admin/departures/{id}/pricing` | ADMIN | `TourDepartureManagementController.updatePricing()` | Update price tiers |
-| `PUT` | `/api/admin/departures/{id}/transport` | ADMIN | `TourDepartureManagementController.updateTransport()` | Update transport info |
+| `PUT` | `/api/admin/departures/{id}/pricing` | ADMIN | `TourDepartureManagementController.updatePricing()` | Update prices |
+| `PUT` | `/api/admin/departures/{id}/transport` | ADMIN | `TourDepartureManagementController.updateTransport()` | Transport info |
 | `POST` | `/api/admin/departures/{id}/clone` | ADMIN | `TourDepartureManagementController.cloneDeparture()` | Clone to new date |
-| `DELETE` | `/api/admin/departures/{id}` | ADMIN | `TourDepartureManagementController.deleteDeparture()` | Delete departure |
+| `DELETE` | `/api/admin/departures/{id}` | ADMIN | `TourDepartureManagementController.deleteDeparture()` | Delete |
 
 #### Admin Location Management
 
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
-| `POST` | `/api/admin/locations` | ADMIN | `LocationAdminController.create()` | Add new location |
+| `POST` | `/api/admin/locations` | ADMIN | `LocationAdminController.create()` | Add location |
 | `PUT` | `/api/admin/locations/{id}` | ADMIN | `LocationAdminController.update()` | Update location |
 | `DELETE` | `/api/admin/locations/{id}` | ADMIN | `LocationAdminController.delete()` | Delete location |
 
@@ -570,237 +534,177 @@ POST /api/auth/register { email, password, fullName }
 
 | Method | Path | Caller | Description |
 |--------|------|--------|-------------|
-| `GET` | `/internal/tours/departures/{id}` | booking-service | Get departure details + pricing for booking |
-| `PUT` | `/internal/tours/departures/{id}/slots` | booking-service | Decrement `available_slots` atomically |
-| `PUT` | `/internal/tours/departures/{id}/slots/restore` | booking-service | Restore slots on booking cancel |
+| `GET` | `/internal/tours/departures/{id}` | booking-service | Departure info + pricing |
+| `PUT` | `/internal/tours/departures/{id}/slots` | booking-service | Decrement available_slots (pessimistic lock) |
+| `PUT` | `/internal/tours/departures/{id}/slots/restore` | booking-service | Restore on cancel |
 
 ---
 
 ### 4.3 Booking Service `:8083`
 
-**Database**: `tourism_booking`  
-**Tables**: `bookings`, `booking_passengers`, `refund_information`  
-**Redis**: Cache booking by code (TTL=30min while PENDING, no expiry after CONFIRMED)  
-**Feign**: → tour-catalog-service, → promotion-service  
+**DB**: `tourism_booking` | **Tables**: `bookings`, `booking_passengers`, `refund_information`
+**Redis**: Cache booking by code (TTL=30min PENDING, permanent CONFIRMED)
+**Feign out**: → tour-catalog-service, → promotion-service
 **Kafka Producer**: `booking.created`, `booking.confirmed`, `booking.cancelled`
 
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
-| `GET` | `/api/bookings/order` | USER | `BookingController.getBookingInitInfo()` | Pre-fetch tour + departure info for booking form |
-| `POST` | `/api/bookings` | USER | `BookingController.createBooking()` | Create booking |
-| `GET` | `/api/bookings/my` | USER | `BookingController.getAllBookingsByUser()` | User's bookings, filter by status |
-| `GET` | `/api/bookings/code/{code}` | USER | `BookingController.getBookingDetail()` | Booking detail (with ownership check) |
-| `POST` | `/api/bookings/{id}/cancel` | USER | `BookingController.cancelBooking()` | Cancel PENDING booking |
+| `GET` | `/api/bookings/order` | USER | `BookingController.getBookingInitInfo()` | Pre-fill booking form data |
+| `POST` | `/api/bookings` | USER | `BookingController.createBooking()` | Full create flow |
+| `GET` | `/api/bookings/my` | USER | `BookingController.getAllBookingsByUser()` | My bookings, filterable by status |
+| `GET` | `/api/bookings/code/{code}` | USER | `BookingController.getBookingDetail()` | Detail with ownership check |
+| `POST` | `/api/bookings/{id}/cancel` | USER | `BookingController.cancelBooking()` | Cancel PENDING + restore slots |
 | `POST` | `/api/bookings/{id}/refund-request` | USER | `BookingController.requestRefund()` | Create refund request |
-| `POST` | `/api/admin/bookings/search` | ADMIN | `BookingController.searchBookings()` | Admin search with filters |
-| `PATCH` | `/api/admin/bookings/{id}/status` | ADMIN | `BookingController.updateBookingStatus()` | Force status update |
+| `POST` | `/api/admin/bookings/search` | ADMIN | `BookingController.searchBookings()` | Admin search |
+| `PATCH` | `/api/admin/bookings/{id}/status` | ADMIN | `BookingController.updateBookingStatus()` | Force status change |
 
-**Booking Status Machine**:
+**Booking Status FSM**:
 ```
-PENDING_PAYMENT ──(payment success)──► CONFIRMED
-PENDING_PAYMENT ──(user cancel)──────► CANCELLED
-PENDING_PAYMENT ──(30min timeout)────► EXPIRED
-CONFIRMED ───────(admin cancel)──────► CANCELLED
-CONFIRMED ───────(tour completed)────► COMPLETED
+PENDING_PAYMENT → (payment success)   → CONFIRMED
+PENDING_PAYMENT → (user cancel)       → CANCELLED
+PENDING_PAYMENT → (30min @Scheduled)  → EXPIRED
+CONFIRMED       → (admin cancel)      → CANCELLED
+CONFIRMED       → (auto/admin)        → COMPLETED
 ```
 
 **Create Booking Flow**:
 ```
-POST /api/bookings
-  Body: { tourCode, departureId, couponCode?, passengers: [{ fullName, dob, type }] }
+POST /api/bookings { tourCode, departureId, couponCode?, passengers[] }
 
-  1. GET Departure info:   Feign → tour-catalog GET /internal/tours/departures/{departureId}
-  2. Validate coupon:      Feign → promotion    POST /internal/coupons/{code}/validate
-  3. Calculate total:      Σ(passengers × price_by_type) - coupon_discount
-  4. Lock coupon:          Feign → promotion    POST /internal/coupons/{code}/apply
-  5. Decrement slots:      Feign → tour-catalog PUT /internal/tours/departures/{id}/slots
-  6. Save Booking { status: PENDING_PAYMENT, expires_at: now+30min }
-  7. Save BookingPassengers
-  8. Kafka publish:        booking.created event
-  9. Redis cache:          "booking:{code}" → BookingDto (TTL=30min)
-  10. Return { bookingCode, totalAmount, expiresAt }
+① Feign → tour-catalog  GET /internal/tours/departures/{id}
+② Feign → promotion     POST /internal/coupons/{code}/validate
+③ total = Σ(passengers × price_by_type) − discount
+④ Feign → promotion     POST /internal/coupons/{code}/apply   (atomic)
+⑤ Feign → tour-catalog  PUT /internal/tours/departures/{id}/slots
+⑥ Save Booking { status=PENDING_PAYMENT, expires_at=now+30min }
+⑦ Save BookingPassengers
+⑧ Kafka → booking.created
+⑨ Redis cache "booking:{code}" TTL=30min
+⑩ Return { bookingCode, totalAmount, expiresAt }
 ```
 
 #### Internal Endpoints
 
 | Method | Path | Caller | Description |
 |--------|------|--------|-------------|
-| `POST` | `/internal/bookings/{code}/confirm` | payment-service | CONFIRMED + Kafka `booking.confirmed` |
-| `GET` | `/internal/bookings/check-confirmed` | review-service | Check `?userId=&tourCode=` has CONFIRMED booking |
+| `POST` | `/internal/bookings/{code}/confirm` | payment-service | CONFIRMED + Kafka booking.confirmed |
+| `GET` | `/internal/bookings/check-confirmed` | review-service | `?userId=&tourCode=` → boolean |
 
 ---
 
 ### 4.4 Payment Service `:8084`
 
-**Database**: `tourism_payment`  
-**Tables**: `payments`  
-**Feign**: → booking-service  
+**DB**: `tourism_payment` | **Tables**: `payments`
+**Feign out**: → booking-service
 **Kafka Producer**: `payment.completed`
+**External**: VNPay, PayOS, SePay
 
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
 | `POST` | `/api/payments/vnpay/create` | USER | `PaymentController.createVNPayPayment()` | Generate VNPay redirect URL |
-| `GET` | `/api/payments/vnpay-return` | Public | `PaymentController.vnpayReturn()` | VNPay redirect callback |
-| `POST` | `/api/payments/payos/create` | USER | `PaymentController.createPayOSPayment()` | Create PayOS checkout + QR |
-| `POST` | `/api/payments/payos-webhook` | Public | `PaymentController.handlePayOSWebhook()` | PayOS server-to-server webhook |
-| `GET` | `/api/payments/payos/return` | Public | `PaymentController.payosReturn()` | PayOS redirect on success |
-| `GET` | `/api/payments/payos/cancel` | Public | `PaymentController.payosCancel()` | PayOS redirect on cancel |
-| `POST` | `/api/payments/sepay-webhook` | Public | `PaymentController.handleSepayWebhook()` | SePay bank transfer webhook |
-| `GET` | `/api/payments/status/{orderCode}` | USER | `PaymentController.getPaymentStatus()` | Query payment status |
-| `GET` | `/api/payments/booking/{bookingCode}` | USER | *(NEW)* | Get payment for a booking |
-
-**VNPay Flow**:
-```
-POST /api/payments/vnpay/create { bookingCode, returnUrl }
-  → Save Payment { status: PENDING, method: VNPAY }
-  → Build VNPay URL (HMAC-SHA512 signed)
-  ← { paymentUrl }
-
-GET /api/payments/vnpay-return?vnp_ResponseCode=00&vnp_SecureHash=...
-  → Verify HMAC-SHA512 signature
-  → if 00 (success):
-      Feign → booking-service POST /internal/bookings/{code}/confirm
-      Update Payment { status: COMPLETED }
-      Kafka publish: payment.completed
-  → Redirect to frontend /payment/result?success=true&bookingCode=...
-```
+| `GET` | `/api/payments/vnpay-return` | Public | `PaymentController.vnpayReturn()` | VNPay callback (verify HMAC → confirm) |
+| `POST` | `/api/payments/payos/create` | USER | `PaymentController.createPayOSPayment()` | PayOS checkout + QR |
+| `POST` | `/api/payments/payos-webhook` | Public | `PaymentController.handlePayOSWebhook()` | PayOS server webhook |
+| `GET` | `/api/payments/payos/return` | Public | `PaymentController.payosReturn()` | PayOS success redirect |
+| `GET` | `/api/payments/payos/cancel` | Public | `PaymentController.payosCancel()` | PayOS cancel redirect |
+| `POST` | `/api/payments/sepay-webhook` | Public | `PaymentController.handleSepayWebhook()` | Bank transfer webhook |
+| `GET` | `/api/payments/status/{orderCode}` | USER | `PaymentController.getPaymentStatus()` | Query status |
+| `GET` | `/api/payments/booking/{bookingCode}` | USER | *(NEW)* | Payment detail for booking |
 
 ---
 
 ### 4.5 Review Service `:8085`
 
-**Database**: `tourism_review`  
-**Tables**: `reviews`, `review_images`  
-**Feign**: → booking-service  
-**Cloudinary**: Review image upload  
+**DB**: `tourism_review` | **Tables**: `reviews`, `review_images`
+**Feign out**: → booking-service
+**External**: Cloudinary (review images)
 **Kafka Producer**: `review.created`
 
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
-| `POST` | `/api/reviews` | USER | `ReviewController.submitReview()` | Submit review (multipart) |
-| `GET` | `/api/reviews/booking/{bookingCode}` | USER | `ReviewController.getReview()` | Review for specific booking |
-| `GET` | `/api/reviews/eligibility/{bookingCode}` | USER | *(NEW)* | Can user review this booking? |
-| `GET` | `/api/reviews/tour/{code}` | Public | `ReviewController.getReviewsByTour()` | All reviews for a tour, paginated |
-| `GET` | `/api/reviews/tour/{code}/summary` | Public | `ReviewController.getReviewStatistics()` | Avg rating + star distribution |
+| `POST` | `/api/reviews` | USER | `ReviewController.submitReview()` | Review + multipart images |
+| `GET` | `/api/reviews/booking/{bookingCode}` | USER | `ReviewController.getReview()` | Review for booking |
+| `GET` | `/api/reviews/eligibility/{bookingCode}` | USER | *(NEW)* | Can user review? |
+| `GET` | `/api/reviews/tour/{code}` | Public | `ReviewController.getReviewsByTour()` | Tour reviews, paginated |
+| `GET` | `/api/reviews/tour/{code}/summary` | Public | `ReviewController.getReviewStatistics()` | Avg + star distribution |
 | `GET` | `/api/reviews/my` | USER | *(NEW)* | My reviews |
 | `DELETE` | `/api/reviews/{id}` | USER | *(NEW)* | Delete own review |
-| `DELETE` | `/api/admin/reviews/{id}` | ADMIN | *(NEW)* | Admin delete any review |
-
-**Review Submission Flow**:
-```
-POST /api/reviews (multipart/form-data)
-  Fields: bookingCode, rating (1-5), comment, images[] (optional)
-
-  1. Read X-User-Id from header
-  2. Feign → booking-service GET /internal/bookings/check-confirmed
-     ?userId={userId}&tourCode={tourCode}
-  3. if not confirmed → 403 "Bạn chưa hoàn thành tour này"
-  4. if already reviewed → 409 "Bạn đã đánh giá tour này"
-  5. Upload images[] → Cloudinary → get secure_urls
-  6. Save Review + ReviewImages
-  7. Kafka publish: review.created { tourId, tourCode, rating }
-```
+| `DELETE` | `/api/admin/reviews/{id}` | ADMIN | *(NEW)* | Admin delete |
 
 ---
 
 ### 4.6 Promotion Service `:8086`
 
-**Database**: `tourism_promotion`  
-**Tables**: `coupons`
+**DB**: `tourism_promotion` | **Tables**: `coupons`
 
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
-| `GET` | `/api/promotions/coupons/{code}` | USER | `CouponController.validateCoupon()` | Preview coupon info before applying |
-| `GET` | `/api/admin/coupons` | ADMIN | `CouponController.getAllCoupons()` | All coupons with pagination |
-| `GET` | `/api/admin/coupons/search` | ADMIN | `CouponController.searchCoupons()` | Search by keyword |
+| `GET` | `/api/promotions/coupons/{code}` | USER | `CouponController.validateCoupon()` | Preview before applying |
+| `GET` | `/api/admin/coupons` | ADMIN | `CouponController.getAllCoupons()` | Paginated list |
+| `GET` | `/api/admin/coupons/search` | ADMIN | `CouponController.searchCoupons()` | Keyword search |
 | `POST` | `/api/admin/coupons` | ADMIN | `CouponController.createCoupon()` | Create coupon |
-| `PUT` | `/api/admin/coupons/{id}` | ADMIN | `CouponController.updateCoupon()` | Update coupon |
-| `DELETE` | `/api/admin/coupons/{id}` | ADMIN | `CouponController.deleteCoupon()` | Delete coupon |
+| `PUT` | `/api/admin/coupons/{id}` | ADMIN | `CouponController.updateCoupon()` | Update |
+| `DELETE` | `/api/admin/coupons/{id}` | ADMIN | `CouponController.deleteCoupon()` | Delete |
 
 #### Internal Endpoints
 
 | Method | Path | Caller | Description |
 |--------|------|--------|-------------|
-| `POST` | `/internal/coupons/{code}/validate` | booking-service | Validate (read-only check, no side effects) |
-| `POST` | `/internal/coupons/{code}/apply` | booking-service | Atomically decrement `usage_count` |
-| `POST` | `/internal/coupons/{code}/restore` | booking-service | Restore on booking cancel |
+| `POST` | `/internal/coupons/{code}/validate` | booking-service | Read-only check (no side effects) |
+| `POST` | `/internal/coupons/{code}/apply` | booking-service | Atomic decrement usage_count |
+| `POST` | `/internal/coupons/{code}/restore` | booking-service | Restore on cancel |
 
 ---
 
 ### 4.7 Notification Service `:8087`
 
-**Database**: `tourism_notification`  
-**Tables**: `notifications`, `user_notifications`  
-**Kafka Consumer**: 5 topics  
-**JavaMail**: Gmail SMTP + HTML templates
+**DB**: `tourism_notification` | **Tables**: `notifications`, `user_notifications`
+**Kafka Consumer**: 5 topics | **External**: JavaMail + Gmail SMTP
 
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
-| `GET` | `/api/notifications/my` | USER | `NotificationController.getMyNotifications()` | In-app notification list |
+| `GET` | `/api/notifications/my` | USER | `NotificationController.getMyNotifications()` | In-app list |
 | `GET` | `/api/notifications/unread-count` | USER | `NotificationController.getUnreadCount()` | Badge count |
-| `PUT` | `/api/notifications/{id}/read` | USER | `NotificationController.markAsRead()` | Mark one as read |
-| `PUT` | `/api/notifications/read-all` | USER | `NotificationController.markAllAsRead()` | Mark all as read |
+| `PUT` | `/api/notifications/{id}/read` | USER | `NotificationController.markAsRead()` | Mark one read |
+| `PUT` | `/api/notifications/read-all` | USER | `NotificationController.markAllAsRead()` | Mark all read |
 
-**Kafka Event → Action Mapping**:
-
-| Topic | Email Subject | In-App Message |
-|-------|--------------|----------------|
-| `user.registered` | "Chào mừng {name} đến với Tourism!" | "Tài khoản đã tạo thành công" |
-| `booking.created` | "Đặt tour thành công — Mã #{code}" | "Đặt tour {tourName} thành công" |
-| `booking.confirmed` | "Tour của bạn đã được xác nhận" | "Booking #{code} đã xác nhận" |
-| `booking.cancelled` | "Thông báo: Tour bị huỷ" | "Booking #{code} đã bị huỷ" |
-| `payment.completed` | "Biên lai thanh toán {amount}đ" | "Thanh toán thành công" |
+**Kafka → Action Mapping**:
+| Topic | Email | In-App |
+|-------|-------|--------|
+| `user.registered` | Welcome email | "Tài khoản tạo thành công" |
+| `booking.created` | "Đặt tour #{code}" | "Đặt tour {name} thành công" |
+| `booking.confirmed` | "Tour đã xác nhận" | "Booking #{code} xác nhận" |
+| `booking.cancelled` | "Tour bị huỷ" | "Booking #{code} đã huỷ" |
+| `payment.completed` | "Biên lai {amount}đ" | "Thanh toán thành công" |
 
 ---
 
 ### 4.8 Analytics Service `:8088`
 
-**Database**: `tourism_analytics`  
-**Tables**: `daily_stats`, `tour_stats`  
-**Kafka Consumer**: 5 topics  
-**External**: Google Gemini API
+**DB**: `tourism_analytics` | **Tables**: `daily_stats`, `tour_stats`
+**Kafka Consumer**: 5 topics | **External**: Google Gemini API
 
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
-| `GET` | `/api/analytics/dashboard/summary` | ADMIN | `DashboardController.getDashboardStatistics()` | Total revenue, bookings, users, tours |
-| `GET` | `/api/analytics/dashboard/daily-stats` | ADMIN | `DashboardController.getDashboardAIAnalysis()` | Last 7/30 days stats for charts |
-| `GET` | `/api/analytics/dashboard/top-tours` | ADMIN | *(NEW)* | Top tours by revenue/bookings |
-| `POST` | `/api/analytics/chatbot/chat` | ADMIN | `ChatbotController.chat()` | AI chatbot powered by Gemini |
-
-**Kafka → Stats Update**:
-```
-booking.created    →  daily_stats.new_bookings++
-booking.confirmed  →  daily_stats.confirmed_bookings++
-booking.cancelled  →  daily_stats.cancelled_bookings++
-payment.completed  →  daily_stats.total_revenue += amount
-                       tour_stats.total_revenue += amount
-review.created     →  tour_stats: recalculate avg_rating
-```
-
-**Chatbot System Prompt** (inject context):
-```
-Bạn là trợ lý AI cho quản lý hệ thống du lịch. Dữ liệu hôm nay:
-- Doanh thu: {today_revenue}đ
-- Bookings mới: {new_bookings}
-- Tours active: {active_tours}
-Trả lời câu hỏi về dữ liệu kinh doanh bằng tiếng Việt.
-```
+| `GET` | `/api/analytics/dashboard/summary` | ADMIN | `DashboardController.getDashboardStatistics()` | KPI totals |
+| `GET` | `/api/analytics/dashboard/daily-stats` | ADMIN | `DashboardController.getDashboardAIAnalysis()` | 7/30 day chart data |
+| `GET` | `/api/analytics/dashboard/top-tours` | ADMIN | *(NEW)* | Top by revenue/bookings |
+| `POST` | `/api/analytics/chatbot/chat` | ADMIN | `ChatbotController.chat()` | Gemini AI chatbot |
 
 ---
 
 ### 4.9 CMS Service `:8089`
 
-**Database**: `tourism_cms`  
-**Tables**: `policy_templates`, `branch_contacts`
+**DB**: `tourism_cms` | **Tables**: `policy_templates`, `branch_contacts`
 
 | Method | Path | Auth | Monolith Source | Description |
 |--------|------|------|-----------------|-------------|
 | `GET` | `/api/cms/policies` | Public | `PolicyTemplateController.getPolicies()` | All policies |
-| `GET` | `/api/cms/policies/type/{type}` | Public | `PolicyTemplateController.getPolicyByType()` | Latest policy by type |
-| `POST` | `/api/cms/policies` | ADMIN | `PolicyTemplateController.createPolicy()` | Create policy |
-| `PUT` | `/api/cms/policies/{id}` | ADMIN | `PolicyTemplateController.updatePolicy()` | Update policy |
-| `DELETE` | `/api/cms/policies/{id}` | ADMIN | `PolicyTemplateController.deletePolicy()` | Delete policy |
-| `GET` | `/api/cms/branches` | Public | `BranchContactController.getBranches()` | All branch offices |
+| `GET` | `/api/cms/policies/type/{type}` | Public | `PolicyTemplateController.getPolicyByType()` | Latest by type |
+| `POST` | `/api/cms/policies` | ADMIN | `PolicyTemplateController.createPolicy()` | Create |
+| `PUT` | `/api/cms/policies/{id}` | ADMIN | `PolicyTemplateController.updatePolicy()` | Update |
+| `DELETE` | `/api/cms/policies/{id}` | ADMIN | `PolicyTemplateController.deletePolicy()` | Delete |
+| `GET` | `/api/cms/branches` | Public | `BranchContactController.getBranches()` | Branches list |
 | `POST` | `/api/cms/branches` | ADMIN | `BranchContactController.createBranch()` | Add branch |
 | `PUT` | `/api/cms/branches/{id}` | ADMIN | `BranchContactController.updateBranch()` | Update branch |
 | `DELETE` | `/api/cms/branches/{id}` | ADMIN | `BranchContactController.deleteBranch()` | Delete branch |
@@ -809,196 +713,136 @@ Trả lời câu hỏi về dữ liệu kinh doanh bằng tiếng Việt.
 
 ## 5. Inter-Service Communication
 
-### 5.1 Feign Client Dependency Graph
+### 5.1 Feign Dependency Graph
 
 ```
 iam-service
-  └──► identity-service     POST /internal/users/authenticate
-  └──► identity-service     GET  /internal/users/{id}/info
+  └──► identity-service  POST /internal/users/authenticate
+  └──► identity-service  GET  /internal/users/{id}/info
 
 identity-service
-  └──► iam-service          POST /internal/iam/issue (after register/google login)
+  └──► iam-service       POST /internal/iam/issue  (post register/Google)
 
 booking-service
-  └──► tour-catalog-service GET  /internal/tours/departures/{id}
-  └──► tour-catalog-service PUT  /internal/tours/departures/{id}/slots
-  └──► tour-catalog-service PUT  /internal/tours/departures/{id}/slots/restore
-  └──► promotion-service    POST /internal/coupons/{code}/validate
-  └──► promotion-service    POST /internal/coupons/{code}/apply
-  └──► promotion-service    POST /internal/coupons/{code}/restore
+  └──► tour-catalog      GET  /internal/tours/departures/{id}
+  └──► tour-catalog      PUT  /internal/tours/departures/{id}/slots
+  └──► tour-catalog      PUT  /internal/tours/departures/{id}/slots/restore
+  └──► promotion         POST /internal/coupons/{code}/validate
+  └──► promotion         POST /internal/coupons/{code}/apply
+  └──► promotion         POST /internal/coupons/{code}/restore
 
 payment-service
-  └──► booking-service      POST /internal/bookings/{code}/confirm
+  └──► booking-service   POST /internal/bookings/{code}/confirm
 
 review-service
-  └──► booking-service      GET  /internal/bookings/check-confirmed
+  └──► booking-service   GET  /internal/bookings/check-confirmed
 ```
 
 ### 5.2 Internal Endpoint Security
 
 ```yaml
-# All /internal/** endpoints:
-# 1. NOT routed through API Gateway (not in route table)
-# 2. Only reachable within Docker bridge network (tourism-net)
-# 3. No JWT required — pure service-to-service
-# 4. Add X-Internal-Secret header for extra security (optional)
-
-# application.yml for each service:
-internal.secret: ${INTERNAL_SECRET:dev-secret-only}
-
-# In InternalController:
-@RequestHeader("X-Internal-Secret") String secret  # validate this
+# /internal/** endpoints:
+# ① NOT in API Gateway route table → unreachable from outside
+# ② Only reachable within Docker bridge network (tourism-net)
+# ③ No JWT check — service-to-service only
+# ④ Optional: X-Internal-Secret header validation
+internal.secret: ${INTERNAL_SECRET:dev-secret}
 ```
 
 ---
 
 ## 6. Kafka Event Bus
 
-### 6.1 Event Definitions (`common-events` library)
+### 6.1 Event Records (`common-events` library)
 
 ```java
 // shared-libs/common-events/src/main/java/com/tourism/events/
 
 public record UserRegisteredEvent(
-    Long userId, String email, String fullName, Instant registeredAt
-) {}
+    Long userId, String email, String fullName, Instant registeredAt) {}
 
 public record BookingCreatedEvent(
     String bookingCode, Long userId, String userEmail,
     String tourCode, String tourName, String departureDate,
-    BigDecimal totalAmount, Integer passengerCount, Instant createdAt
-) {}
+    BigDecimal totalAmount, Integer passengerCount, Instant createdAt) {}
 
 public record BookingConfirmedEvent(
     String bookingCode, Long userId, String userEmail,
-    String tourName, String tourCode, String departureDate
-) {}
+    String tourName, String tourCode, String departureDate) {}
 
 public record BookingCancelledEvent(
     String bookingCode, Long userId, String userEmail,
-    String tourName, String reason, Instant cancelledAt
-) {}
+    String tourName, String reason, Instant cancelledAt) {}
 
 public record PaymentCompletedEvent(
     String bookingCode, Long userId, String userEmail,
-    BigDecimal amount, String paymentMethod, String orderId, Instant paidAt
-) {}
+    BigDecimal amount, String paymentMethod, String orderId, Instant paidAt) {}
 
 public record ReviewCreatedEvent(
     Long reviewId, Long tourId, String tourCode,
-    Long userId, Integer rating, Instant createdAt
-) {}
+    Long userId, Integer rating, Instant createdAt) {}
 ```
 
-### 6.2 Event Flow Matrix
+### 6.2 Producer → Consumer Matrix
 
 ```
-PRODUCER            TOPIC                  CONSUMERS
-──────────────      ─────────────────────  ────────────────────────────
-identity-service  → user.registered      → notification-service
-                                          → analytics-service
+PRODUCER            TOPIC                 CONSUMERS
+identity-service  → user.registered     → notification-service
 
-booking-service   → booking.created      → notification-service
-                                          → analytics-service
+booking-service   → booking.created     → notification-service
+                                         → analytics-service
 
-booking-service   → booking.confirmed    → notification-service
-                                          → analytics-service
+booking-service   → booking.confirmed   → notification-service
+                                         → analytics-service
 
-booking-service   → booking.cancelled    → notification-service
-                                          → analytics-service
+booking-service   → booking.cancelled   → notification-service
+                                         → analytics-service
 
-payment-service   → payment.completed    → notification-service
-                                          → analytics-service
+payment-service   → payment.completed   → notification-service
+                                         → analytics-service
 
-review-service    → review.created       → analytics-service
+review-service    → review.created      → analytics-service
 ```
 
 ---
 
 ## 7. Database Decomposition
 
-### 7.1 Schema: `tourism_iam`
+### 7.1 `init-db.sql` (runs once on first postgres start)
 
 ```sql
-CREATE TABLE refresh_tokens (
-    id           BIGSERIAL PRIMARY KEY,
-    user_id      BIGINT NOT NULL,
-    token_hash   VARCHAR(64) NOT NULL UNIQUE,
-    expires_at   TIMESTAMP NOT NULL,
-    revoked      BOOLEAN DEFAULT FALSE,
-    device_info  VARCHAR(255),
-    created_at   TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE token_blacklist (
-    jti            VARCHAR(36) PRIMARY KEY,
-    expires_at     TIMESTAMP NOT NULL,
-    blacklisted_at TIMESTAMP DEFAULT NOW()
-);
+CREATE DATABASE tourism_iam;
+CREATE DATABASE tourism_identity;
+CREATE DATABASE tourism_catalog;
+CREATE DATABASE tourism_booking;
+CREATE DATABASE tourism_payment;
+CREATE DATABASE tourism_review;
+CREATE DATABASE tourism_promotion;
+CREATE DATABASE tourism_notification;
+CREATE DATABASE tourism_analytics;
+CREATE DATABASE tourism_cms;
 ```
 
-### 7.2 Schema: `tourism_identity`
+### 7.2 Cross-Service References (No FK Constraints)
 
-```sql
-CREATE TABLE users (
-    id               BIGSERIAL PRIMARY KEY,
-    email            VARCHAR(255) UNIQUE NOT NULL,
-    password_hash    VARCHAR(60),           -- null for Google users
-    full_name        VARCHAR(255),
-    phone            VARCHAR(20),
-    date_of_birth    DATE,
-    avatar_url       VARCHAR(512),
-    role             VARCHAR(20) DEFAULT 'USER',  -- USER | ADMIN
-    status           VARCHAR(20) DEFAULT 'PENDING_VERIFICATION',
-    google_id        VARCHAR(255),
-    province_code    VARCHAR(10),
-    province_name    VARCHAR(100),
-    district_code    VARCHAR(10),
-    district_name    VARCHAR(100),
-    created_at       TIMESTAMP DEFAULT NOW(),
-    updated_at       TIMESTAMP DEFAULT NOW()
-);
+```
+-- Booking stores snapshots to avoid Feign calls at read time:
+booking.user_id     BIGINT  -- ref identity.users.id (no FK)
+booking.tour_id     BIGINT  -- ref catalog.tours.id (no FK)
+booking.tour_code   VARCHAR -- snapshot for display (no Feign needed)
+booking.tour_name   VARCHAR -- snapshot for display
 
-CREATE TABLE email_verifications (
-    id         BIGSERIAL PRIMARY KEY,
-    user_id    BIGINT NOT NULL,
-    token      VARCHAR(36) UNIQUE NOT NULL,  -- UUID
-    expires_at TIMESTAMP NOT NULL,
-    used       BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT NOW()
-);
+-- Favorite stores just user_id (no FK across services):
+favorite_tours.user_id BIGINT -- ref identity.users.id (no FK)
+
+-- Review stores just user_id:
+reviews.user_id     BIGINT  -- ref identity.users.id (no FK)
 ```
 
-### 7.3 Schema: `tourism_catalog`
+### 7.3 Key DB Schemas
 
 ```sql
-CREATE TABLE locations (
-    id        BIGSERIAL PRIMARY KEY,
-    name      VARCHAR(255) NOT NULL,
-    region    VARCHAR(100),
-    latitude  DECIMAL(10,8),
-    longitude DECIMAL(11,8)
-);
-
-CREATE TABLE tours (
-    id             BIGSERIAL PRIMARY KEY,
-    code           VARCHAR(50) UNIQUE NOT NULL,
-    title          VARCHAR(500) NOT NULL,
-    description    TEXT,
-    highlights     TEXT,
-    thumbnail_url  VARCHAR(512),
-    region         VARCHAR(100),
-    location_id    BIGINT REFERENCES locations(id),
-    category       VARCHAR(100),
-    status         VARCHAR(20) DEFAULT 'ACTIVE',
-    price_from     DECIMAL(15,2),
-    duration_days  INTEGER,
-    booking_count  INTEGER DEFAULT 0,
-    created_at     TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE tour_images (id, tour_id, url, type, sort_order);
-CREATE TABLE itinerary_days (id, tour_id, day_number, title, description, meals, accommodation);
+-- tourism_catalog
 CREATE TABLE tour_departures (
     id              BIGSERIAL PRIMARY KEY,
     tour_id         BIGINT NOT NULL,
@@ -1009,14 +853,9 @@ CREATE TABLE tour_departures (
     status          VARCHAR(20) DEFAULT 'OPEN',
     note            TEXT
 );
-CREATE TABLE departure_pricings (id, departure_id, passenger_type, price, description);
-CREATE TABLE departure_transports (id, departure_id, type, details, departure_point, return_point);
-CREATE TABLE favorite_tours (id, user_id, tour_id, created_at, UNIQUE(user_id, tour_id));
-```
+-- Use SELECT ... FOR UPDATE when decrementing slots
 
-### 7.4 Schema: `tourism_booking`
-
-```sql
+-- tourism_booking
 CREATE TABLE bookings (
     id              BIGSERIAL PRIMARY KEY,
     code            VARCHAR(20) UNIQUE NOT NULL,
@@ -1031,124 +870,72 @@ CREATE TABLE bookings (
     total_amount    DECIMAL(15,2) NOT NULL,
     status          VARCHAR(30) DEFAULT 'PENDING_PAYMENT',
     expires_at      TIMESTAMP,
-    note            TEXT,
     created_at      TIMESTAMP DEFAULT NOW()
 );
-
-CREATE TABLE booking_passengers (
-    id           BIGSERIAL PRIMARY KEY,
-    booking_id   BIGINT NOT NULL,
-    full_name    VARCHAR(255) NOT NULL,
-    date_of_birth DATE,
-    id_number    VARCHAR(50),
-    type         VARCHAR(20),  -- ADULT | CHILD | INFANT
-    price        DECIMAL(15,2)
-);
-
-CREATE TABLE refund_information (
-    id              BIGSERIAL PRIMARY KEY,
-    booking_id      BIGINT UNIQUE NOT NULL,
-    bank_name       VARCHAR(255),
-    account_number  VARCHAR(50),
-    account_holder  VARCHAR(255),
-    amount          DECIMAL(15,2),
-    status          VARCHAR(20) DEFAULT 'PENDING',
-    requested_at    TIMESTAMP DEFAULT NOW()
-);
-```
-
-### 7.5 Cross-Service Reference Strategy
-
-```
-No foreign keys across service boundaries.
-Cross-service references are stored as plain IDs (BIGINT) with a snapshot
-of key display data to avoid Feign calls at read time.
-
-Example — booking stores:
-  user_id    BIGINT  (references identity.users.id — no FK constraint)
-  tour_id    BIGINT  (references catalog.tours.id — no FK constraint)
-  tour_code  VARCHAR (snapshot — avoids tour-catalog call for display)
-  tour_name  VARCHAR (snapshot — for display without cross-service call)
 ```
 
 ---
 
 ## 8. Infrastructure & External Integrations
 
-### 8.1 Infrastructure Stack
+### 8.1 Docker Infrastructure
 
 | Component | Port | Image | Purpose |
 |-----------|------|-------|---------|
-| Apache Kafka | `9092` | `confluentinc/cp-kafka:7.5.0` | Async event streaming |
 | Zookeeper | `2181` | `confluentinc/cp-zookeeper:7.5.0` | Kafka coordinator |
-| PostgreSQL 15 | `5432` | `postgres:15-alpine` | Single instance, 10 logical databases |
-| Redis 7 | `6379` | `redis:7-alpine` | Token blacklist cache + booking cache |
+| Apache Kafka | `9092` | `confluentinc/cp-kafka:7.5.0` | Event streaming |
+| PostgreSQL 15 | `5432` | `postgres:15-alpine` | Single instance, 10 logical DBs |
+| Redis 7 | `6379` | `redis:7-alpine` | Token blacklist + booking cache |
 | Zipkin | `9411` | `openzipkin/zipkin` | Distributed tracing |
-| Eureka | `8761` | *(custom Spring Boot)* | Service registry |
+| Eureka | `8761` | *(custom)* | Service registry |
 
-### 8.2 External Integrations
-
-| Service | Used by | Method |
-|---------|---------|--------|
-| **Cloudinary CDN** | identity, tour-catalog, review | Java SDK |
-| **Gmail SMTP** | identity, notification | Spring Mail |
-| **Google OAuth2** | identity-service | `google-api-client` library |
-| **VNPay** | payment-service | REST URL + HMAC-SHA512 |
-| **PayOS** | payment-service | REST API + webhook |
-| **SePay** | payment-service | Webhook |
-| **Google Gemini** | analytics-service | REST API |
-| **ngrok** | Dev local testing | Expose webhook endpoints |
-
-### 8.3 Complete `.env` Reference
+### 8.2 Complete `.env` Reference
 
 ```bash
-# ── JWT (only for iam-service and api-gateway) ──
-JWT_SECRET=your-64-char-random-secret-here
+# ── JWT (ONLY iam-service + api-gateway) ──────────────────────────────
+JWT_SECRET=your-64-char-random-string-here
 JWT_ACCESS_EXPIRY_MS=900000       # 15 minutes
 JWT_REFRESH_EXPIRY_MS=604800000   # 7 days
+INTERNAL_SECRET=change-in-production
 
-# ── Internal service communication ──
-INTERNAL_SECRET=change-this-in-production
-
-# ── Database ──
+# ── Database ───────────────────────────────────────────────────────────
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 
-# ── Redis ──
+# ── Redis ──────────────────────────────────────────────────────────────
 REDIS_HOST=redis
 REDIS_PORT=6379
 
-# ── Kafka ──
+# ── Kafka ──────────────────────────────────────────────────────────────
 KAFKA_BOOTSTRAP_SERVERS=kafka:29092
 
-# ── Cloudinary ──
+# ── Cloudinary ─────────────────────────────────────────────────────────
 CLOUDINARY_CLOUD_NAME=your-cloud-name
 CLOUDINARY_API_KEY=your-api-key
 CLOUDINARY_API_SECRET=your-api-secret
 
-# ── JavaMail (Gmail) ──
-MAIL_USERNAME=your-email@gmail.com
-MAIL_PASSWORD=your-app-password   # 16-char Google App Password
+# ── JavaMail (Gmail App Password) ──────────────────────────────────────
+MAIL_USERNAME=your@gmail.com
+MAIL_PASSWORD=xxxx-xxxx-xxxx-xxxx
 
-# ── Google OAuth2 ──
+# ── Google ─────────────────────────────────────────────────────────────
 GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-xxx
 
-# ── Payment: VNPay ──
+# ── VNPay ──────────────────────────────────────────────────────────────
 VNPAY_TMN_CODE=your-tmn-code
-VNPAY_HASH_SECRET=your-hash-secret
+VNPAY_HASH_SECRET=your-secret
 VNPAY_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
-VNPAY_RETURN_URL=${BASE_URL}/api/payments/vnpay-return
 
-# ── Payment: PayOS ──
+# ── PayOS ──────────────────────────────────────────────────────────────
 PAYOS_CLIENT_ID=your-client-id
 PAYOS_API_KEY=your-api-key
-PAYOS_CHECKSUM_KEY=your-checksum-key
+PAYOS_CHECKSUM_KEY=your-key
 
-# ── AI ──
-GEMINI_API_KEY=your-gemini-key
+# ── Gemini AI ──────────────────────────────────────────────────────────
+GEMINI_API_KEY=your-key
 
-# ── App base URL (update for production) ──
+# ── App URLs ───────────────────────────────────────────────────────────
 BASE_URL=http://localhost:8080
 FRONTEND_URL=http://localhost:5173
 ```
@@ -1161,17 +948,15 @@ FRONTEND_URL=http://localhost:5173
 
 ```
 D:\KLTN\tourism-microservices-v2\
-├── pom.xml                       # Root Maven POM — manages all modules
-├── docker-compose.yml            # Full stack production compose
-├── docker-compose.dev.yml        # Dev override (host mounts if needed)
-├── init-db.sql                   # Creates 10 PostgreSQL databases
-├── .env.example                  # Template with all required vars
-├── .gitignore
+├── pom.xml                         # Root Maven POM (parent of all modules)
+├── docker-compose.yml              # Full stack (infra + all services)
+├── docker-compose.dev.yml          # Dev overrides (hot-reload mounts)
+├── init-db.sql                     # Creates 10 PostgreSQL databases
+├── .env / .env.example
 ├── README.md
 │
 ├── shared-libs/
-│   └── common-events/            # Kafka event DTOs only (NO security lib)
-│       ├── pom.xml
+│   └── common-events/              # Kafka event DTOs ONLY (no security lib)
 │       └── src/main/java/com/tourism/events/
 │           ├── UserRegisteredEvent.java
 │           ├── BookingCreatedEvent.java
@@ -1181,740 +966,673 @@ D:\KLTN\tourism-microservices-v2\
 │           └── ReviewCreatedEvent.java
 │
 ├── infrastructure/
-│   ├── service-registry/         # Eureka Server :8761
-│   │   ├── pom.xml
-│   │   ├── Dockerfile
-│   │   └── src/...
-│   └── api-gateway/              # Spring Cloud Gateway :8080
-│       ├── pom.xml
-│       ├── Dockerfile
+│   ├── service-registry/            # Eureka :8761
+│   └── api-gateway/                 # Spring Cloud Gateway :8080
 │       └── src/main/java/com/tourism/gateway/
-│           ├── filter/
-│           │   └── JwtAuthGatewayFilter.java   # Calls IAM verify
-│           ├── config/
-│           │   ├── RouteConfig.java
-│           │   └── PublicPathConfig.java
-│           └── client/
-│               └── IamClient.java              # WebClient to IAM
+│           ├── filter/JwtAuthGatewayFilter.java
+│           ├── config/RouteConfig.java
+│           └── client/IamWebClient.java
 │
-└── services/
-    ├── iam-service/              # :8090 — NEW
-    ├── identity-service/         # :8081
-    ├── tour-catalog-service/     # :8082
-    ├── booking-service/          # :8083
-    ├── payment-service/          # :8084
-    ├── review-service/           # :8085
-    ├── promotion-service/        # :8086
-    ├── notification-service/     # :8087
-    ├── analytics-service/        # :8088
-    └── cms-service/              # :8089
+├── services/
+│   ├── iam-service/                 # :8090
+│   ├── identity-service/            # :8081
+│   ├── tour-catalog-service/        # :8082
+│   ├── booking-service/             # :8083
+│   ├── payment-service/             # :8084
+│   ├── review-service/              # :8085
+│   ├── promotion-service/           # :8086
+│   ├── notification-service/        # :8087
+│   ├── analytics-service/           # :8088
+│   └── cms-service/                 # :8089
+│
+└── frontend/                        # Vite-migrated client-side
+    ├── package.json
+    ├── vite.config.ts
+    ├── index.html
+    └── src/                         # Copied from D:\KLTN\client-side\src\
+        ├── App.tsx                  # keep as-is
+        ├── context/AuthContext.tsx  # UPDATE auth endpoints → IAM
+        ├── utils/axiosInstance.ts   # REWRITE: /iam/auth/refresh-token
+        ├── components/              # keep all 17 component dirs
+        ├── services/                # update dashboard → analytics-service
+        ├── dto/ hook/ data/ assets/ # keep as-is
+        └── services/notification/   # NEW: notificationService.ts
 ```
 
-### 9.2 Standard Service Layout
+### 9.2 Standard Service Package Layout
 
 ```
-services/{service-name}/
-├── pom.xml
-├── Dockerfile
-└── src/
-    ├── main/
-    │   ├── java/com/tourism/{domain}/
-    │   │   ├── {Domain}Application.java
-    │   │   ├── controller/
-    │   │   │   ├── {Public}Controller.java      # /api/** endpoints
-    │   │   │   ├── {Admin}Controller.java        # /api/admin/** endpoints
-    │   │   │   └── InternalController.java       # /internal/** (Feign only)
-    │   │   ├── service/
-    │   │   ├── repository/
-    │   │   ├── entity/
-    │   │   ├── dto/
-    │   │   │   ├── request/
-    │   │   │   └── response/
-    │   │   ├── client/                           # Feign clients (if any)
-    │   │   ├── event/
-    │   │   │   ├── producer/                     # KafkaTemplate producers
-    │   │   │   └── consumer/                     # @KafkaListener consumers
-    │   │   ├── config/
-    │   │   │   ├── SecurityConfig.java           # Uses HeaderAuthFilter
-    │   │   │   ├── HeaderAuthFilter.java         # ~30 lines, reads X-User-*
-    │   │   │   └── UserPrincipal.java            # record { userId, email, role }
-    │   │   └── exception/
-    │   │       └── GlobalExceptionHandler.java
-    │   └── resources/
-    │       ├── application.yml
-    │       └── db/migration/
-    │           └── V1__init.sql
-    └── test/
-        └── java/com/tourism/{domain}/
-            ├── controller/                       # MockMvc tests
-            └── service/                          # Unit tests
-```
-
-### 9.3 Root `pom.xml` Structure
-
-```xml
-<modules>
-    <!-- Shared Event DTOs only -->
-    <module>shared-libs/common-events</module>
-
-    <!-- Infrastructure -->
-    <module>infrastructure/service-registry</module>
-    <module>infrastructure/api-gateway</module>
-
-    <!-- Business Services -->
-    <module>services/iam-service</module>
-    <module>services/identity-service</module>
-    <module>services/tour-catalog-service</module>
-    <module>services/booking-service</module>
-    <module>services/payment-service</module>
-    <module>services/review-service</module>
-    <module>services/promotion-service</module>
-    <module>services/notification-service</module>
-    <module>services/analytics-service</module>
-    <module>services/cms-service</module>
-</modules>
-
-<properties>
-    <java.version>17</java.version>
-    <spring-boot.version>3.3.0</spring-boot.version>
-    <spring-cloud.version>2023.0.2</spring-cloud.version>
-    <!-- NO jjwt in most services — only iam-service and api-gateway -->
-</properties>
+services/{name}/src/main/java/com/tourism/{domain}/
+├── {Domain}Application.java
+├── controller/
+│   ├── PublicController.java       # GET/public endpoints
+│   ├── UserController.java         # Authenticated user endpoints
+│   ├── AdminController.java        # /api/admin/** (ROLE_ADMIN)
+│   └── InternalController.java     # /internal/** (Feign only, no JWT)
+├── service/
+├── repository/
+├── entity/
+├── dto/
+│   ├── request/
+│   └── response/
+├── client/                         # Feign clients (if consuming)
+├── event/
+│   ├── producer/                   # KafkaTemplate wrappers
+│   └── consumer/                   # @KafkaListener handlers
+├── config/
+│   ├── SecurityConfig.java
+│   ├── HeaderAuthFilter.java       # ~30 lines, reads X-User-* headers
+│   └── UserPrincipal.java          # record { userId, email, role }
+└── exception/
+    └── GlobalExceptionHandler.java
 ```
 
 ---
 
-## 10. 30-Day Master Plan
+## 10. 30-Day Parallel Master Plan
 
-### Timeline Overview
+> ⚡ **PARALLEL PRINCIPLE**: Each day has both **`[BE]` Backend** and **`[FE]` Frontend** tracks.  
+> Backend and Frontend developers work simultaneously.  
+> Each week delivers a **vertical slice** — working features end-to-end.
+
+### Delivery Overview
 
 ```
-Week 1  (D01–D07)  Infrastructure Scaffold + IAM Service + API Gateway
-Week 2  (D08–D14)  Identity + Tour Catalog + Booking Services
-Week 3  (D15–D21)  Payment + Review + Promotion + Notification + Analytics + CMS
-Week 4  (D22–D27)  React Frontend (Auth → Tours → Booking → Admin)
-Days 28–30         End-to-End Testing + Dockerize + Deploy AWS
+Week 1 (D01–D07) │ Infrastructure + IAM + Gateway  │  Vite Setup + Auth UI
+                  │  → Foundation ready             │  → Login/Register/Verify working
+─────────────────────────────────────────────────────────────────────────
+Week 2 (D08–D14) │ Identity + Tour Catalog          │  HomePage + Tours + Tour Detail
+                  │  → Browse tours working         │  → Browse end-to-end with real data
+─────────────────────────────────────────────────────────────────────────
+Week 3 (D15–D21) │ Booking + Payment + Review       │  Booking Flow + Payment + Reviews
+                  │  → Full booking flow working    │  → Complete user journey shipped
+─────────────────────────────────────────────────────────────────────────
+Week 4 (D22–D28) │ Promotion + Notif + Analytics    │  Admin Dashboard + Integration
+                  │  + CMS + Hardening              │  E2E Tests + Docker + Deploy
+─────────────────────────────────────────────────────────────────────────
+Day 29-30         │ AWS Deployment + Smoke Tests + Final Documentation
 ```
 
 ---
 
-### 📅 Day 1 — Project Scaffold & Infrastructure
+### 🗓️ WEEK 1 — Foundation · Auth · Infrastructure
 
-**Goal**: New project created, infra containers running, Eureka healthy
+---
 
-**Tasks**:
+#### 📅 Day 1 — Project Scaffold
+
+**`[BE]`** Backend:
 ```bash
-mkdir D:\KLTN\tourism-microservices-v2
+mkdir D:\KLTN\tourism-microservices-v2 && cd !$
+git init
+
+# Create root directory structure
+mkdir -p shared-libs/common-events/src/main/java/com/tourism/events
+mkdir -p infrastructure/{service-registry,api-gateway}/src/main/java
+mkdir -p services/{iam,identity,tour-catalog,booking,payment,review,promotion,notification,analytics,cms}-service/src/main/java
+```
+- [ ] Root `pom.xml` with all 12 module declarations
+- [ ] `shared-libs/common-events/` with 6 event records
+- [ ] `docker-compose.yml`: postgres, redis, kafka, zookeeper, zipkin, service-registry
+- [ ] `init-db.sql`: 10 CREATE DATABASE statements
+- [ ] `.env.example` documented
+- [ ] `docker-compose up -d` → verify Eureka at `http://localhost:8761`
+
+**`[FE]`** Frontend:
+```bash
 cd D:\KLTN\tourism-microservices-v2
-git init && git remote add origin <repo-url>
+npm create vite@latest frontend -- --template react-ts
+cd frontend
+
+# Install exact versions from client-side/package.json
+npm install axios@1.13.2 @reduxjs/toolkit react-redux react-router-dom@7
+npm install antd @ant-design/icons lucide-react react-icons
+npm install @react-oauth/google react-toastify recharts swiper date-fns
+npm install @stomp/stompjs sockjs-client react-quill react-bootstrap bootstrap
+npm install react-datepicker react-select react-confetti react-imask react-markdown dvhcvn
+npm install -D sass @types/node
 ```
+- [ ] Copy `src/` from `D:\KLTN\client-side\src\` into `frontend/src/`
+- [ ] Setup `vite.config.ts` with proxy `/api → localhost:8080`
+- [ ] Create `frontend/.env`: `VITE_API_URL=http://localhost:8080`
 
-- [ ] Create root `pom.xml` with all module declarations
-- [ ] Create `shared-libs/common-events/` with 6 event record classes
-- [ ] Create `infrastructure/service-registry/` (port from v1, no changes)
-- [ ] Create `docker-compose.yml`:
-  - zookeeper, kafka, postgres (single instance), redis, zipkin, service-registry
-- [ ] Create `init-db.sql`:
-  ```sql
-  CREATE DATABASE tourism_iam;
-  CREATE DATABASE tourism_identity;
-  CREATE DATABASE tourism_catalog;
-  CREATE DATABASE tourism_booking;
-  CREATE DATABASE tourism_payment;
-  CREATE DATABASE tourism_review;
-  CREATE DATABASE tourism_promotion;
-  CREATE DATABASE tourism_notification;
-  CREATE DATABASE tourism_analytics;
-  CREATE DATABASE tourism_cms;
-  ```
-- [ ] Create `.env.example` with all variables documented
-- [ ] `docker-compose up -d zookeeper kafka postgres redis zipkin service-registry`
-- [ ] Verify: `http://localhost:8761` (Eureka dashboard)
-
-**Git commit**: `chore: project scaffold + infrastructure v2`
+**`[BE]` Deliverable**: Docker infra running, Eureka green ✅  
+**`[FE]` Deliverable**: `npm run dev` starts at `:5173` with existing UI visible
 
 ---
 
-### 📅 Day 2 — IAM Service: Token Engine
+#### 📅 Day 2 — IAM Service: Token Engine
 
-**Goal**: IAM can issue and verify JWT tokens independently
-
-**Core classes**:
-```java
-// TokenService.java
-String generateAccessToken(Long userId, String email, String role)
-// → JWT: sub=userId, email, role, jti=UUID, iat, exp=now+15min
-
-String generateRefreshToken(Long userId)
-// → SecureRandom(32 bytes) → Base64url → hash SHA256 → save to DB
-
-TokenVerifyResponse verify(String rawToken)
-// → parse JWT (catch ExpiredJwtException, SignatureException)
-// → check Redis blacklist (key=jti)
-// → if miss Redis: check DB token_blacklist
-// → return { valid, userId, email, role }
-
-void blacklist(String jti, Instant expiresAt)
-// → Redis SET jti "" EX <remaining_seconds>
-// → INSERT INTO token_blacklist
-```
-
-- [ ] IAM `pom.xml`: jjwt-api, jjwt-impl, spring-boot-starter-data-jpa, spring-data-redis
-- [ ] Flyway `V1__init_iam.sql`
-- [ ] `TokenService` + `RefreshTokenService`
+**`[BE]`** IAM Service core:
+- [ ] `iam-service/pom.xml`: jjwt-api, spring-data-redis, spring-data-jpa
+- [ ] Flyway `V1__init_iam.sql` (refresh_tokens + token_blacklist tables)
+- [ ] `TokenService.generateAccessToken(userId, email, role)` → JWT with jti=UUID
+- [ ] `TokenService.generateRefreshToken(userId)` → SecureRandom → SHA256 stored
+- [ ] `TokenService.verify(rawToken)` → check Redis blacklist → return TokenVerifyResponse
 - [ ] `POST /internal/iam/verify` endpoint
-- [ ] `POST /internal/iam/issue` endpoint
-- [ ] Redis connection config
-- [ ] Unit tests: `TokenServiceTest` (valid, expired, blacklisted)
+- [ ] Redis Caffeine config
+- [ ] Unit tests: valid token, expired token, blacklisted token
+
+**`[FE]`** Rewrite axiosInstance + AuthContext:
+- [ ] **Rewrite** `src/utils/axiosInstance.ts` (from `axiosCustomize.js`):
+  - Change refresh URL: `/auth/refresh-token` → `/iam/auth/refresh-token`
+  - Use `import.meta.env.VITE_API_URL` instead of hardcoded URL
+  - Remove console.log debug statements
+  - Add TypeScript types
+- [ ] **Rewrite** `src/context/AuthContext.tsx`:
+  - Login: `POST /auth/login` → `POST /iam/auth/login`
+  - Logout: `POST /auth/logout` → `POST /iam/auth/logout`
+  - Refresh: `POST /auth/refresh-token` → `POST /iam/auth/refresh-token`
+  - Google login stays: `POST /auth/google/login` (identity-service route)
+
+**`[BE]` Deliverable**: TokenService unit tests all green  
+**`[FE]` Deliverable**: axiosInstance.ts + AuthContext.tsx updated, compiles
 
 ---
 
-### 📅 Day 3 — IAM Service: Login, Logout, Refresh
+#### 📅 Day 3 — IAM Service: Login/Logout/Refresh + API Gateway
 
-**Goal**: Login → tokens → refresh → logout → tokens dead
+**`[BE]` IAM** (morning):
+- [ ] `IamAuthController`: 4 public endpoints (login/logout/logout-all/refresh-token)
+- [ ] `POST /api/iam/auth/login` full flow: Feign identity → generate pair → return
+- [ ] `POST /api/iam/auth/logout` → blacklist jti in Redis + DB
+- [ ] `POST /api/iam/auth/refresh-token` → validate SHA256 → issue new pair (rotate)
+- [ ] `@Scheduled` cleanup expired blacklist rows
 
-- [ ] `IamAuthController`: `/api/iam/auth/login|logout|logout-all|refresh-token`
-- [ ] `IdentityServiceClient` (Feign to identity-service)
-- [ ] `POST /api/iam/auth/login` full flow (see §4.0)
-- [ ] `POST /api/iam/auth/logout` — blacklist jti + revoke refresh token
-- [ ] `POST /api/iam/auth/logout-all` — revoke all refresh tokens for userId
-- [ ] `POST /api/iam/auth/refresh-token` — validate hash → issue new pair (rotation)
-- [ ] Scheduled cleanup: `@Scheduled(cron="0 0 * * * *")` delete expired blacklist rows
-- [ ] Postman tests: login → verify → logout → verify dead
+**`[BE]` API Gateway** (afternoon):
+- [ ] `api-gateway/pom.xml`: spring-cloud-starter-gateway, caffeine, webflux
+- [ ] `JwtAuthGatewayFilter.java` GlobalFilter:
+  - Check `public-paths` list
+  - Caffeine cache (key=token, TTL=60s)
+  - `WebClient` POST `/internal/iam/verify`
+  - Inject X-User-Id, X-User-Email, X-User-Role headers
+  - Return 401 on invalid, 503 on IAM timeout
+- [ ] `RouteConfig.java` with all 11 routes + CORS config
 
----
+**`[FE]`** Login + Register page fixes:
+- [ ] Test `Login/Login.tsx` → calls `/iam/auth/login` → confirm token stored
+- [ ] Test `RegisterComponent/Register.tsx` → calls `/auth/register` (identity-service)
+- [ ] Test `VerifyEmail/VerifyEmail.tsx` → calls `/auth/verify-email`
+- [ ] Fix any imports breaking from `.js → .ts` migration
+- [ ] Verify Google Sign-In button renders correctly
 
-### 📅 Day 4 — API Gateway: JWT Filter → IAM
-
-**Goal**: Gateway calls IAM to verify; injects headers; public paths bypass
-
-```java
-// JwtAuthGatewayFilter.java
-// Key points:
-// 1. Caffeine cache: token → TokenVerifyResponse (TTL=60s)
-// 2. Path matcher for public paths from config
-// 3. WebClient (non-blocking) to iam-service
-// 4. On IAM error (timeout etc.) → return 503, not 401
-```
-
-- [ ] `api-gateway/pom.xml`: spring-cloud-starter-gateway, spring-cloud-starter-netflix-eureka-client, caffeine, spring-boot-starter-webflux
-- [ ] `JwtAuthGatewayFilter.java` with Caffeine cache
-- [ ] `RouteConfig.java` with all routes (see §3.3)
-- [ ] `PublicPathConfig.java` loaded from application.yml
-- [ ] CORS config: allow `http://localhost:5173`
-- [ ] Test matrix:
-  - Public route without token → 200
-  - Protected route without token → 401
-  - Protected route with valid token → forward with X-User-* headers
-  - Protected route with expired token → 401
-  - Protected route after logout → 401 (within 60s cache TTL: may briefly succeed)
+**`[BE]` Deliverable**: IAM login works via Gateway with token injection verified  
+**`[FE]` Deliverable**: Login + Register flows functional in browser
 
 ---
 
-### 📅 Day 5 — Identity Service: User Registration + Email Verify
+#### 📅 Day 4 — Identity Service: Register + Email Verify + Profile
 
-**Goal**: Register → email sent → click verify → account active
-
-- [ ] `identity-service/pom.xml`: NO jjwt dependency
+**`[BE]`** Identity Service:
+- [ ] `identity-service/pom.xml`: NO jjwt — only spring-boot-starter-web, spring-data-jpa, spring-mail, google-api-client, cloudinary
 - [ ] Flyway `V1__init_identity.sql`
-- [ ] `User` entity, `EmailVerification` entity
-- [ ] `POST /api/auth/register`:
-  - validate uniqueness
-  - BCrypt hash password
-  - save User (status=PENDING)
-  - save EmailVerification (UUID, 24h)
-  - send HTML email (JavaMail)
-  - Kafka publish: user.registered
-  - Feign → IAM POST /internal/iam/issue → get tokens
-  - return 201 with tokens
-- [ ] `GET /api/auth/verify-email?token=`
-- [ ] `POST /api/auth/resend-verification`
-- [ ] JavaMail HTML template for verification email
-- [ ] `InternalUserController`:
-  - `POST /internal/users/authenticate`
-  - `GET /internal/users/{id}/info`
+- [ ] `POST /api/auth/register` → BCrypt → save → email verification UUID → JavaMail → Feign IAM issue
+- [ ] `GET /api/auth/verify-email` → activate account
+- [ ] `POST /api/auth/resend-verification` → rate-limit 1/min
+- [ ] `POST /api/auth/google/login` → verify Google ID token → findOrCreate user → Feign IAM issue
+- [ ] `GET /api/auth/profile` → reads X-User-Id header (no JWT)
+- [ ] `HeaderAuthFilter.java` + `SecurityConfig.java`
+- [ ] `POST /internal/users/authenticate` (for IAM)
+- [ ] HTML email template (reuse from monolith Thymeleaf)
+
+**`[FE]`** Auth flow end-to-end test:
+- [ ] Full flow in browser: Register → check email inbox → click verify → Login → get profile
+- [ ] Google login button → OAuth popup → token stored
+- [ ] Verify `ProtectedRoute.jsx` still works
+- [ ] Fix any `process.env.REACT_APP_*` → `import.meta.env.VITE_*` references
+
+**`[BE]` Deliverable**: Email verification received + account activatable  
+**`[FE]` Deliverable**: Full auth cycle works in browser end-to-end
 
 ---
 
-### 📅 Day 6 — Identity Service: Google OAuth + Profile + Admin
+#### 📅 Day 5 — Identity Service: User Profile + Admin
 
-**Goal**: All identity-service endpoints complete
-
-- [ ] `POST /api/auth/google/login`:
-  - Verify Google ID Token via google-api-client
-  - findOrCreate user
-  - Feign → IAM issue token
-- [ ] `GET /api/auth/profile` (reads X-User-Id header)
-- [ ] `PATCH /api/users/{id}/profile` (multipart + Cloudinary)
+**`[BE]`**:
+- [ ] `GET /api/users/{id}` — user detail
+- [ ] `PATCH /api/users/{id}/profile` — multipart + Cloudinary avatar upload
 - [ ] `PATCH /api/users/{id}/change-password`
-- [ ] `GET /api/admin/users`, `POST /api/admin/users/search`
+- [ ] `GET /api/admin/users` — paginated
+- [ ] `POST /api/admin/users/search`
 - [ ] `PATCH /api/admin/users/{id}/status`
-- [ ] `HeaderAuthFilter.java` + `SecurityConfig.java` (based on §2.5)
-- [ ] Unit tests for UserService
+- [ ] Kafka producer: `user.registered` event
+
+**`[FE]`** InformationComponent (profile page):
+- [ ] Test `InformationComponent/` — profile tab loads from `GET /api/auth/profile`
+- [ ] Test avatar upload → `PATCH /api/users/{id}/profile`
+- [ ] Test change password → `PATCH /api/users/{id}/change-password`
+- [ ] Verify `src/services/user/` endpoints match new service ports
+
+**`[BE]` Deliverable**: Identity service COMPLETE ✅  
+**`[FE]` Deliverable**: Profile page functional
 
 ---
 
-### 📅 Day 7 — Buffer + Week 1 E2E Test
+#### 📅 Day 6 — Integration + Week 1 E2E
 
-**Full E2E Scenario**:
+**Full Auth E2E Test**:
 ```
-1. Register       → 201 + tokens
-2. Verify email   → 200 (account active)
-3. Login          → 200 + tokens
-4. Get profile    → 200 (using X-User-Id header from gateway)
-5. Update avatar  → 200 (Cloudinary URL in response)
-6. Google login   → 200 + tokens
-7. Logout         → 200
-8. Use old token  → 401 (blacklisted)
-9. Logout-all     → 200
-10. Use refresh   → 401 (revoked)
+① POST /api/iam/auth/login          → 200 + tokens
+② GET  /api/auth/profile            → 200 + user data (X-User-Id from Gateway)
+③ PATCH /api/users/{id}/profile     → 200 + Cloudinary URL
+④ PATCH /api/users/{id}/change-pwd  → 200
+⑤ POST /api/iam/auth/logout         → 200
+⑥ GET  /api/auth/profile (old token)→ 401 (blacklisted in IAM)
+⑦ POST /api/iam/auth/logout-all     → 200
+⑧ POST /api/iam/auth/refresh-token  → 401 (revoked)
 ```
 
-**Git tag**: `v0.1-iam-identity`
+**`[BE]`**:
+- [ ] Run E2E via Postman (week 1 collection)
+- [ ] Fix any Feign circuit-breaker issues
+- [ ] Verify Zipkin traces flow: `api-gateway → iam-service → identity-service`
+
+**`[FE]`**:
+- [ ] Browser test all 8 scenarios above
+- [ ] Verify 401 → auto-refresh → retry works in browser
+- [ ] Check browser DevTools: no CORS errors
+
+**Git tag**: `git tag v0.1-auth-foundation`
 
 ---
 
-### 📅 Day 8 — Tour Catalog: DB Schema + Public APIs
+#### 📅 Day 7 — Buffer: Fix + Docs + Week 2 Prep
 
-**Goal**: Public tour browsing works end-to-end
-
-- [ ] Flyway `V1__init_catalog.sql` (all 8 tables)
-- [ ] Port entities from monolith
-- [ ] `HeaderAuthFilter` (copy §2.5 pattern)
-- [ ] Public APIs:
-  - `GET /api/tours` (filter + pagination)
-  - `GET /api/tours/featured`
-  - `GET /api/tours/code/{code}` + `GET /api/tours/{id}`
-  - `GET /api/tours/{id}/departures/available`
-  - `GET /api/locations`
-- [ ] Test: `curl http://localhost:8080/api/tours` → JSON array
+- [ ] Fix any blocking bugs from D1–D6
+- [ ] Write Postman collection for Week 1 endpoints
+- [ ] Verify Docker compose healthchecks pass
+- [ ] Create `gap-analysis.md` — mark all endpoints: ✅ Done / 🔧 WIP / ❌ Pending
 
 ---
 
-### 📅 Day 9 — Tour Catalog: Admin APIs + Cloudinary + Internal
+### 🗓️ WEEK 2 — Tour Catalog · Browsing End-to-End
 
-- [ ] Admin tour CRUD (8 endpoints) + `@PreAuthorize("hasRole('ADMIN')")`
+---
+
+#### 📅 Day 8 — Tour Catalog Service: Schema + Public APIs
+
+**`[BE]`**:
+- [ ] Flyway `V1__init_catalog.sql` — 8 tables (tours, tour_images, tour_departures, departure_pricings, departure_transports, itinerary_days, locations, favorite_tours)
+- [ ] Port entities from `Tourism_Backend` (Tour, TourDeparture, etc.)
+- [ ] `HeaderAuthFilter` + `SecurityConfig`
+- [ ] `GET /api/tours` — pagination + filter
+- [ ] `GET /api/tours/featured`
+- [ ] `GET /api/tours/code/{code}` + `GET /api/tours/{id}`
+- [ ] `GET /api/locations`
+- [ ] Internal: `GET /internal/tours/departures/{id}`
+
+**`[FE]`** Homepage + Tour listing:
+- [ ] Verify `homPageComponent/HomePage.tsx` renders featured tours from `GET /api/tours/featured`
+- [ ] Verify `toursPageComponent/ToursPage.tsx` filter (region, priceFrom, priceTo) + pagination
+- [ ] Fix response field mapping if JSON shape differs from monolith
+
+**`[BE]` Deliverable**: Public tour APIs working  
+**`[FE]` Deliverable**: HomePage shows real tour data from tour-catalog-service
+
+---
+
+#### 📅 Day 9 — Tour Catalog: Admin + Departures + Cloudinary
+
+**`[BE]`**:
+- [ ] Admin tour CRUD (9 endpoints) + `@PreAuthorize("hasRole('ADMIN')")`
 - [ ] Admin departure management (6 endpoints)
 - [ ] Admin location management (3 endpoints)
+- [ ] Cloudinary config: thumbnail + gallery upload
+- [ ] `GET /api/tours/{id}/departures/available` (new endpoint)
+- [ ] `GET /api/tours/{id}/related`
+- [ ] Internal slots: `PUT /internal/tours/departures/{id}/slots` (`SELECT … FOR UPDATE`)
 - [ ] Favorite tour endpoints (3)
-- [ ] Cloudinary config + thumbnail/gallery upload
-- [ ] Internal endpoints:
-  - `GET /internal/tours/departures/{id}`
-  - `PUT /internal/tours/departures/{id}/slots` (use `@Lock(PESSIMISTIC_WRITE)`)
-  - `PUT /internal/tours/departures/{id}/slots/restore`
+
+**`[FE]`** Tour Detail page:
+- [ ] Verify `TourDetailComponent/TourDetail.tsx` — gallery Swiper, itinerary tabs, departure table
+- [ ] Test favorite button → `POST /api/tours/favorites`
+- [ ] Fix departure table to use `/api/tours/{id}/departures/available`
+- [ ] Test `DestinationSearchComponent` filter → navigate to `/tours?location=...`
+
+**`[BE]` Deliverable**: Tour Catalog COMPLETE ✅  
+**`[FE]` Deliverable**: Tour detail fully interactive with real data
 
 ---
 
-### 📅 Day 10 — Booking Service: Create Booking
+#### 📅 Day 10 — Admin Tour UI
 
+**`[BE]`**: Buffer + fix tour-catalog issues
+
+**`[FE]`** AdminComponent — Tour Management:
+- [ ] Verify `AdminComponent/Pages/` — tour management table loads from `GET /api/admin/tours`
+- [ ] Test create tour modal → `POST /api/admin/tours`
+- [ ] Test departure management CRUD
+- [ ] Test image upload (thumbnail + gallery) → Cloudinary
+- [ ] Test location admin CRUD
+
+**`[FE]` Deliverable**: Admin can fully manage tours from browser
+
+---
+
+#### 📅 Day 11 — CMS Service + CMS Frontend
+
+**`[BE]`** CMS Service (simple — done in 1 day):
+- [ ] Flyway `V1__init_cms.sql`
+- [ ] PolicyTemplate CRUD (5 endpoints)
+- [ ] BranchContact CRUD (5 endpoints)
+
+**`[FE]`** CMS pages:
+- [ ] Verify policy display in frontend (if any public pages use it)
+- [ ] Verify `services/dashboard/` → update all endpoint URLs:
+  - `GET /dashboard/statistics` → `GET /api/analytics/dashboard/summary`
+  - `GET /dashboard/ai-analysis` → `GET /api/analytics/dashboard/daily-stats`
+- [ ] Update `ChatbotWidget/` endpoint: `POST /chatbot/chat` → `POST /api/analytics/chatbot/chat`
+
+**Git tag**: `v0.2-catalog-cms`
+
+---
+
+#### 📅 Day 12 — Week 2 Integration Test
+
+**`[BE]`** + **`[FE]`** Full browse flow:
+
+```
+Register               → account created
+Login                  → token received
+GET /api/tours         → tour list displayed in browser
+GET /api/tours/featured → homepage featured section
+GET /api/tours/code/{c} → tour detail with gallery, departures
+POST /api/tours/favorites → star icon responds
+GET /api/cms/policies  → policy content loads
+GET /api/locations     → filter dropdown populated
+Logout                 → redirect to login
+```
+
+Fix all display issues. Update Postman collection.
+
+---
+
+#### 📅 Day 13 — Promotion Service
+
+**`[BE]`**:
+- [ ] Flyway `V1__init_promotion.sql`
+- [ ] Coupon entity + CRUD
+- [ ] `GET /api/promotions/coupons/{code}` — validate before applying
+- [ ] Admin CRUD (5 endpoints)
+- [ ] Internal: `validate`, `apply` (atomic), `restore`
+
+**`[FE]`** Coupon input in Booking form:
+- [ ] Test `TourBookingComponent/` coupon input field → `GET /api/promotions/coupons/{code}`
+- [ ] Admin `CouponManagement` CRUD page test
+
+---
+
+#### 📅 Day 14 — Buffer + Week 2 Polish
+
+- [ ] Fix any issues from D8–D13
+- [ ] Responsive check for tour pages (375px, 768px, 1440px)
+- [ ] Verify Zipkin traces for tour-related requests
+
+---
+
+### 🗓️ WEEK 3 — Booking · Payment · Review · Notifications
+
+---
+
+#### 📅 Day 15 — Booking Service: Create Booking
+
+**`[BE]`**:
 - [ ] Flyway `V1__init_booking.sql`
 - [ ] Feign clients: `TourCatalogClient`, `PromotionClient`
 - [ ] Redis config for booking cache
-- [ ] `POST /api/bookings` — full create flow (§4.3)
+- [ ] `POST /api/bookings` — full create flow (see §4.3)
 - [ ] `GET /api/bookings/order?tourCode=&departureId=`
 - [ ] `GET /api/bookings/my`
 - [ ] `GET /api/bookings/code/{code}`
+- [ ] Internal: `POST /internal/bookings/{code}/confirm`
+- [ ] Internal: `GET /internal/bookings/check-confirmed`
+
+**`[FE]`** Booking Form:
+- [ ] Test `TourBookingComponent/TourBooking.tsx` → passenger form fills → `POST /api/bookings`
+- [ ] Verify booking code returned and displayed
+- [ ] Test `GET /api/bookings/my` in InformationComponent bookings tab
+
+**`[BE]` Deliverable**: Booking creation end-to-end  
+**`[FE]` Deliverable**: User can complete booking form
 
 ---
 
-### 📅 Day 11 — Booking Service: Cancel + Internal
+#### 📅 Day 16 — Booking Service: Cancel + Admin + Kafka
 
-- [ ] `POST /api/bookings/{id}/cancel` + slot restore Feign call
+**`[BE]`**:
+- [ ] `POST /api/bookings/{id}/cancel` → restore slots Feign + Kafka booking.cancelled
 - [ ] `POST /api/bookings/{id}/refund-request`
 - [ ] Admin search + status update
-- [ ] `POST /internal/bookings/{code}/confirm`
-- [ ] `GET /internal/bookings/check-confirmed`
-- [ ] Kafka producers for all booking events
-- [ ] `@Scheduled` cleanup for EXPIRED bookings
+- [ ] Kafka producers for all 3 booking events
+- [ ] `@Scheduled` cancel EXPIRED bookings (30min timeout)
+
+**`[FE]`** My Bookings page:
+- [ ] Test booking list tabs (All / Pending / Confirmed / Cancelled)
+- [ ] Test cancel button → confirm modal → `POST /api/bookings/{id}/cancel`
+- [ ] Test refund request form
+- [ ] Admin: `BookingsManagePage` → search + status update
+
+**`[BE]` Deliverable**: Booking lifecycle complete  
+**`[FE]` Deliverable**: My Bookings page fully functional
 
 ---
 
-### 📅 Day 12 — Payment Service
+#### 📅 Day 17 — Payment Service
 
-- [ ] Port `PaymentController` from monolith (minimal changes)
-- [ ] VNPay: URL generation + HMAC verify + return handler
-- [ ] PayOS: checkout create + webhook + redirect handlers
-- [ ] SePay: webhook handler
-- [ ] Feign → booking-service confirm
-- [ ] Kafka: payment.completed
-- [ ] ngrok setup for local webhook testing:
-  ```bash
-  ngrok http 8080
-  # Update VNPay/PayOS sandbox returnUrl to ngrok URL
+**`[BE]`**:
+- [ ] Port `PaymentController` from monolith (near zero changes needed)
+- [ ] VNPay: URL generation + HMAC-SHA512 verify + return handler
+- [ ] PayOS: checkout create + server webhook + redirect handlers
+- [ ] SePay: bank transfer webhook
+- [ ] Feign → booking-service confirm on payment success
+- [ ] Kafka: `payment.completed`
+- [ ] Setup ngrok: `ngrok http 8080` → update sandbox webhook URLs
+
+**`[FE]`** Payment pages:
+- [ ] `BookingPaymentComponent/BookingPayment.tsx` → method selection → redirect to VNPay/PayOS
+- [ ] `PaymentSuccess.tsx` → confetti + "View My Bookings" button
+- [ ] `PaymentFailed.tsx`, `PaymentError.tsx`, `PaymentWaitingPage.tsx`
+
+**`[BE]` Deliverable**: VNPay sandbox payment completes end-to-end → booking CONFIRMED  
+**`[FE]` Deliverable**: Payment flow: select → redirect → result page
+
+---
+
+#### 📅 Day 18 — Review Service
+
+**`[BE]`**:
+- [ ] Flyway `V1__init_review.sql`
+- [ ] Feign: `BookingServiceClient`
+- [ ] Cloudinary for images
+- [ ] `POST /api/reviews` — full eligibility check flow
+- [ ] `GET /api/reviews/tour/{code}` + `/summary`
+- [ ] `GET /api/reviews/eligibility/{bookingCode}`
+- [ ] My reviews + delete endpoints
+- [ ] Kafka: `review.created`
+
+**`[FE]`** Review section in Tour Detail:
+- [ ] `TourDetailComponent/` — review tab: rating summary + review list
+- [ ] Write review modal: star selection + textarea + image upload
+- [ ] Check eligibility before showing write button
+- [ ] Test `POST /api/reviews` multipart form
+
+**`[BE]` Deliverable**: Review service COMPLETE ✅  
+**`[FE]` Deliverable**: Review read + write working in Tour Detail
+
+---
+
+#### 📅 Day 19 — Notification Service
+
+**`[BE]`**:
+- [ ] Flyway `V1__init_notification.sql`
+- [ ] 5 `@KafkaListener` handlers
+- [ ] HTML email templates (adapt from monolith Thymeleaf):
+  - Welcome email, booking confirmation, booking cancelled, tour confirmed, payment receipt
+- [ ] REST 4 endpoints: my-notifications, unread-count, mark-read, mark-all-read
+
+**`[FE]`** Notifications:
+- [ ] Create `src/services/notification/notificationService.ts`
+- [ ] Add notification bell icon to `HeaderComponent/` with unread count badge
+- [ ] `GET /api/notifications/unread-count` — polling every 30s
+- [ ] Notification dropdown or `/information/notifications` tab
+- [ ] `PUT /api/notifications/{id}/read` on click
+
+**`[BE]` Deliverable**: Emails sent on booking/payment events  
+**`[FE]` Deliverable**: Notification badge + list visible in header
+
+---
+
+#### 📅 Day 20 — Week 3 Integration Test: Full User Journey
+
+**Complete Booking Journey**:
+```
+Login → Browse Tours → View Detail → Check Departures
+→ Apply Coupon → Create Booking → Choose VNPay
+→ VNPay sandbox payment → Booking CONFIRMED
+→ Receive email notification
+→ View My Bookings (status: CONFIRMED)
+→ Write Review (post-completion)
+→ View Notifications (booking + payment events)
+```
+
+**`[BE]`**:
+- [ ] Run full Postman collection
+- [ ] Check Kafka consumer lag (should be 0)
+- [ ] Verify email received in test inbox
+
+**`[FE]`**:
+- [ ] Full browser walkthrough per journey above
+- [ ] Fix any response shape mismatches
+- [ ] Fix any navigation issues after payment redirect
+
+**Git tag**: `v0.3-full-user-journey`
+
+---
+
+#### 📅 Day 21 — Analytics Service + Admin Dashboard
+
+**`[BE]`**:
+- [ ] Flyway `V1__init_analytics.sql` (daily_stats, tour_stats)
+- [ ] 5 Kafka consumers → incremental stat updates
+- [ ] `GET /api/analytics/dashboard/summary` — total revenue, bookings, users, active tours
+- [ ] `GET /api/analytics/dashboard/daily-stats` — last 7/30 days for charts
+- [ ] `GET /api/analytics/dashboard/top-tours`
+- [ ] `POST /api/analytics/chatbot/chat` — Gemini API with injected stats context
+
+**`[FE]`** Admin Dashboard:
+- [ ] AdminComponent Dashboard page — KPI cards + Recharts LineChart + BarChart
+- [ ] Wire `services/dashboard/` to new `/api/analytics/dashboard/*` endpoints
+- [ ] ChatbotWidget.tsx → `POST /api/analytics/chatbot/chat`
+- [ ] Top tours table in dashboard
+
+**`[BE]` Deliverable**: Analytics service COMPLETE ✅  
+**`[FE]` Deliverable**: Admin dashboard shows real KPIs + chatbot works
+
+---
+
+### 🗓️ WEEK 4 — Admin · Polish · E2E · Docker · Deploy
+
+---
+
+#### 📅 Day 22 — Admin Management Pages + User Management
+
+**`[BE]`**: Backend feature freeze — only bug fixes
+
+**`[FE]`** Admin pages:
+- [ ] `AdminComponent` users page → `GET /api/admin/users`, `PATCH /api/admin/users/{id}/status`
+- [ ] Admin bookings management page → search + force status update
+- [ ] Admin coupon management (already verified D13)
+- [ ] Verify `AddBannerComponent/` if banner management exists
+- [ ] Admin notifications view (if applicable)
+
+**`[FE]` Deliverable**: All admin management pages functional
+
+---
+
+#### 📅 Day 23 — Responsive + Polish + Performance
+
+**`[FE]`**:
+- [ ] Responsive audit: 375px / 768px / 1024px / 1440px
+- [ ] Skeleton loaders for tour list, tour detail, booking list
+- [ ] Error boundaries for all major routes
+- [ ] Custom 404 page
+- [ ] Toast notifications for all user actions (react-toastify)
+- [ ] Remove all `console.log` debug statements
+- [ ] `<title>` and `<meta name="description">` per page (for thesis defense)
+- [ ] Verify `ScrollToTop.jsx` works between routes
+
+**`[BE]`**:
+- [ ] Standardize error response format across ALL services:
+  ```json
+  { "success": false, "message": "...", "data": null, "errors": ["..."] }
   ```
+- [ ] Add `spring-boot-starter-actuator` to all services (healthcheck endpoints)
 
 ---
 
-### 📅 Day 13 — Review + Promotion Services
+#### 📅 Day 24 — E2E Testing: 25-Scenario Checklist
 
-**Promotion**:
-- [ ] CRUD coupons + internal endpoints (validate/apply/restore)
+| # | Scenario | FE | BE |
+|---|----------|----|----|
+| 1 | Register new user | ☐ | ☐ |
+| 2 | Verify email via link | ☐ | ☐ |
+| 3 | Login email + password | ☐ | ☐ |
+| 4 | Login Google OAuth | ☐ | ☐ |
+| 5 | Auto token refresh on 401 | ☐ | ☐ |
+| 6 | Browse tours with filter | ☐ | ☐ |
+| 7 | Search tours by keyword | ☐ | ☐ |
+| 8 | View tour detail + itinerary | ☐ | ☐ |
+| 9 | Favorite a tour | ☐ | ☐ |
+| 10 | Apply coupon code (valid) | ☐ | ☐ |
+| 11 | Create booking with coupon | ☐ | ☐ |
+| 12 | Pay with VNPay sandbox | ☐ | ☐ |
+| 13 | Pay with PayOS QR code | ☐ | ☐ |
+| 14 | Receive booking email | — | ☐ |
+| 15 | View My Bookings (CONFIRMED) | ☐ | ☐ |
+| 16 | Cancel a PENDING booking | ☐ | ☐ |
+| 17 | Submit review + images | ☐ | ☐ |
+| 18 | View in-app notifications | ☐ | ☐ |
+| 19 | Update profile + avatar | ☐ | ☐ |
+| 20 | Change password | ☐ | ☐ |
+| 21 | Admin view dashboard stats | ☐ | ☐ |
+| 22 | Admin create/edit/delete tour | ☐ | ☐ |
+| 23 | Admin manage bookings | ☐ | ☐ |
+| 24 | AI chatbot returns insight | ☐ | ☐ |
+| 25 | Logout-all → tokens dead | ☐ | ☐ |
 
-**Review**:
-- [ ] Flyway migration
-- [ ] Feign → booking-service
-- [ ] Cloudinary for review images
-- [ ] All review endpoints (§4.5)
-- [ ] Kafka: review.created
-
----
-
-### 📅 Day 14 — Notification + Analytics + CMS Services
-
-**Notification**:
-- [ ] 5 Kafka `@KafkaListener` handlers
-- [ ] 5 HTML email templates
-- [ ] 4 REST endpoints
-
-**Analytics**:
-- [ ] DB: daily_stats + tour_stats
-- [ ] 5 Kafka consumers → stat updates
-- [ ] 3 dashboard REST endpoints
-- [ ] Gemini chatbot endpoint
-
-**CMS**:
-- [ ] PolicyTemplate CRUD
-- [ ] BranchContact CRUD
-
-**Git tag**: `v1.0-backend-complete`  
-**Verify**: `docker-compose up -d` → 12 containers healthy in Eureka
+Fix all blocking issues before D25.
 
 ---
 
-### 📅 Day 15 — Integration Test: Full Backend
+#### 📅 Day 25 — Dockerize All Services
 
-**Complete business flow test**:
-```
-Register → Verify Email → Login
-→ Browse Tours → View Detail → Check Departures
-→ Create Booking (with coupon) → VNPay Payment
-→ Booking CONFIRMED → Email Received → Notification In-App
-→ View My Bookings → Write Review
-→ Admin: View Dashboard → Stats Updated → AI Chatbot
-→ Logout-All → Tokens Dead
-```
-
-Fix all bugs. Export Postman Collection.
-
----
-
-### 📅 Day 16 — Frontend Migration: CRA → Vite Setup
-
-> **Strategy**: Không viết lại từ đầu — **migrate** codebase `D:\KLTN\client-side` sang Vite.  
-> Giữ nguyên toàn bộ components, styles, và UI logic. Chỉ thay đổi:
-> 1. Build tool: CRA (`react-scripts`) → Vite  
-> 2. Auth endpoints: `/api/auth/*` → `/api/iam/auth/*` (cho login/logout/refresh)
-> 3. axiosCustomize.js → axiosInstance.ts (TypeScript + point to IAM)
-
-**Existing components to keep** (`D:\KLTN\client-side\src\components\`):
-```
-HeaderComponent/          → Giữ nguyên, update auth calls
-FooterComponent/          → Giữ nguyên
-LayoutComponent/          → Giữ nguyên (MainLayout)
-homPageComponent/         → Giữ nguyên
-toursPageComponent/       → Giữ nguyên
-TourDetailComponent/      → Giữ nguyên
-TourBookingComponent/     → Giữ nguyên
-BookingPaymentComponent/  → Giữ nguyên (PaymentSuccess/Failed/Waiting/Error)
-Login/                    → Update: POST /api/iam/auth/login
-RegisterComponent/        → Update: POST /api/auth/register (identity)
-VerifyEmail/              → Giữ nguyên
-InformationComponent/     → Giữ nguyên (profile + bookings)
-AdminComponent/           → Giữ nguyên + update API calls
-ChatbotWidget/            → Giữ nguyên
-DestinationSearchComponent/ → Giữ nguyên
-```
-
-**Migration steps**:
-```bash
-# 1. Tạo project Vite mới
-cd D:\KLTN
-npm create vite@latest tourism-frontend-v2 -- --template react-ts
-cd tourism-frontend-v2
-
-# 2. Cài đúng dependencies từ client-side/package.json
-npm install axios @reduxjs/toolkit react-redux react-router-dom@7
-npm install antd @ant-design/icons lucide-react react-icons
-npm install @react-oauth/google react-toastify recharts
-npm install swiper date-fns @stomp/stompjs sockjs-client
-npm install react-quill react-bootstrap bootstrap
-npm install react-datepicker react-select react-confetti
-npm install react-imask react-markdown dvhcvn
-npm install -D sass @types/node
-```
-
-- [ ] Copy toàn bộ `src/components/` từ `client-side` vào `tourism-frontend-v2/src/components/`
-- [ ] Copy `src/context/`, `src/dto/`, `src/data/`, `src/hook/`, `src/assets/`
-- [ ] **Rewrite** `src/utils/axiosCustomize.js` → `src/utils/axiosInstance.ts`
-- [ ] **Rewrite** `src/context/AuthContext.jsx` → update login/logout/refresh URLs
-- [ ] Copy và update `src/App.tsx` với routes giống hệt `client-side/src/App.tsx`
-- [ ] Cấu hình `vite.config.ts` với alias `@` → `src/`
-
----
-
-### 📅 Day 17 — Frontend: axiosInstance + AuthContext Migration
-
-**`src/utils/axiosInstance.ts`** — Key changes from existing `axiosCustomize.js`:
-
-```typescript
-import axios from 'axios';
-
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
-
-const instance = axios.create({ baseURL: BASE_URL });
-
-instance.interceptors.request.use((config) => {
-    const token = localStorage.getItem('accessToken');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-});
-
-instance.interceptors.response.use(
-    (res) => res,
-    async (error) => {
-        const originalRequest = error.config;
-        if (error.response?.status === 401 && !originalRequest._retry) {
-            originalRequest._retry = true;
-            try {
-                const refreshToken = localStorage.getItem('refreshToken');
-                if (!refreshToken) throw new Error('No refresh token');
-
-                // ✅ KEY CHANGE: was /auth/refresh-token → now /iam/auth/refresh-token
-                const response = await axios.post(
-                    `${BASE_URL}/iam/auth/refresh-token`,
-                    { refreshToken }
-                );
-                const { accessToken, refreshToken: newRT } = response.data;
-                localStorage.setItem('accessToken', accessToken);
-                if (newRT) localStorage.setItem('refreshToken', newRT);
-                originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-                return instance(originalRequest);
-            } catch {
-                localStorage.removeItem('accessToken');
-                localStorage.removeItem('refreshToken');
-                localStorage.removeItem('user');
-                window.location.href = '/login';
-            }
-        }
-        return Promise.reject(error);
-    }
-);
-
-export default instance;
-```
-
-**`src/context/AuthContext.tsx`** — Key changes from existing `AuthContext.jsx`:
-```typescript
-// ✅ Login: /auth/login  →  /iam/auth/login
-const response = await axios.post('/iam/auth/login', { email, password });
-
-// ✅ Google login: /auth/google/login  →  stays at /auth/google/login (identity-service)
-const response = await axios.post('/auth/google/login', { idToken });
-
-// ✅ Logout: /auth/logout  →  /iam/auth/logout
-await axios.post('/iam/auth/logout', {}, {
-    headers: { Authorization: `Bearer ${localStorage.getItem('accessToken')}` }
-});
-
-// ✅ Refresh: /auth/refresh-token  →  /iam/auth/refresh-token
-const response = await axios.post('/iam/auth/refresh-token', { refreshToken });
-```
-
-- [ ] Rewrite `axiosInstance.ts` với changes trên
-- [ ] Rewrite `AuthContext.tsx` với correct IAM endpoints
-- [ ] Update `src/services/user/` calls (chỉ đổi baseURL, endpoints giữ nguyên)
-- [ ] Browser test: login → token stored → refresh → logout
-
----
-
-### 📅 Day 18 — Frontend: Tour + Booking Services Update
-
-> Các components đã có sẵn — chỉ cần update API base URL và response shape từ microservices
-
-**`src/services/tours/`** — Update endpoints:
-```typescript
-// GET /api/tours → tour-catalog-service (unchanged path)
-// GET /api/tours/{id}/departures/available → NEW endpoint (thêm /available)
-// GET /api/locations → unchanged
-export const getFeaturedTours = () => api.get('/tours/featured');
-export const getAvailableDepartures = (tourId: number) =>
-    api.get(`/tours/${tourId}/departures/available`);
-```
-
-**`src/services/booking/`** — Update endpoints:
-```typescript
-// POST /api/bookings → unchanged (booking-service)
-// GET /api/bookings/my → unchanged
-// POST /api/bookings/{id}/cancel → unchanged
-```
-
-**`src/services/payment/`** — Already correct paths
-
-- [ ] Verify `homPageComponent/HomePage` renders với API response shape từ tour-catalog-service
-- [ ] Verify `toursPageComponent/ToursPage` filter + pagination hoạt động
-- [ ] Verify `TourDetailComponent/TourDetail` hiển thị departure table
-- [ ] Verify `TourBookingComponent/TourBooking` tạo booking (check coupon endpoint: `/promotions/coupons/{code}`)
-- [ ] Fix response mapping nếu field names thay đổi
-- [ ] Test: Browse → Detail → Book flow hoàn chỉnh
-
----
-
-### 📅 Day 19 — Frontend: Payment + Notification Services
-
-**`src/services/payment/`** — Verify paths:
-```typescript
-// POST /api/payments/vnpay/create → unchanged
-// GET  /api/payments/vnpay-return → unchanged (public, no auth)
-// POST /api/payments/payos/create → unchanged
-// POST /api/payments/sepay-webhook → unchanged (public)
-```
-
-**Add notifications service** (new — was not in monolith frontend):
-```typescript
-// src/services/notification/notificationService.ts
-import api from '../../utils/axiosInstance';
-
-export const getMyNotifications = () => api.get('/notifications/my');
-export const getUnreadCount = () => api.get('/notifications/unread-count');
-export const markAsRead = (id: number) => api.put(`/notifications/${id}/read`);
-export const markAllAsRead = () => api.put('/notifications/read-all');
-```
-
-- [ ] Verify `BookingPaymentComponent/BookingPayment` → payment select → VNPay/PayOS redirect
-- [ ] Verify `BookingPaymentComponent/PaymentSuccess` → parse URL params, show confetti
-- [ ] Verify `BookingPaymentComponent/PaymentFailed`, `PaymentError`, `PaymentWaiting`
-- [ ] Add notification bell to `HeaderComponent` → call `getUnreadCount()` on mount
-- [ ] Add notification count badge in header
-
----
-
-### 📅 Day 20 — Frontend: Reviews + Profile + Admin Updates
-
-**`src/services/review/`** — Update + add endpoints:
-```typescript
-// POST /api/reviews → unchanged (review-service)
-// GET  /api/reviews/tour/{code} → unchanged
-// GET  /api/reviews/tour/{code}/summary → NEW (add to service)
-export const getReviewSummary = (tourCode: string) =>
-    api.get(`/reviews/tour/${tourCode}/summary`);
-export const checkEligibility = (bookingCode: string) =>
-    api.get(`/reviews/eligibility/${bookingCode}`);
-```
-
-**Update `InformationComponent`** (profile + bookings tab):
-- Profile tab: `PATCH /api/users/{id}/profile` (unchanged)
-- Bookings tab: `GET /api/bookings/my` (unchanged)
-- Add Notifications tab: `GET /api/notifications/my`
-- Change password: `PATCH /api/users/{id}/change-password` (unchanged)
-
-**Update `AdminComponent` pages**:
-- Dashboard API: `GET /api/analytics/dashboard/summary` ← was `/dashboard/*`
-- ChatbotWidget: `POST /api/analytics/chatbot/chat` ← was `/chatbot/chat`
-- Coupons: `GET /api/admin/coupons` (unchanged)
-- Users admin: `GET /api/admin/users` (unchanged)
-
-- [ ] Fix `InformationComponent` tabs to include Notifications
-- [ ] Fix AdminComponent dashboard → analytics-service endpoints
-- [ ] Fix ChatbotWidget endpoint
-- [ ] Verify `CouponManagement` CRUD endpoints
-
----
-
-### 📅 Day 21 — Frontend: Reviews + Notifications + Profile
-
-- [ ] `ReviewSection` (in TourDetailPage): rating summary + review cards with images
-- [ ] `WriteReviewModal`: star picker + text + multi-image upload
-- [ ] `NotificationsPage` + unread badge on header
-- [ ] `ProfilePage`: view + edit + avatar upload + change password
-
----
-
-### 📅 Day 22 — Frontend: Admin Dashboard + Tour Management
-
-- [ ] `AdminLayout`: collapsible sidebar + breadcrumbs
-- [ ] `DashboardPage`: 4 KPI stat cards + Recharts line+bar charts + top-tours table + AI chatbot widget (floating)
-- [ ] `ToursManagePage`: Ant Design Table + create/edit modal + image upload drawer + departure management
-
----
-
-### 📅 Day 23 — Frontend: Admin Booking + User + Coupon Management
-
-- [ ] `BookingsManagePage`: table + filter + status badge + admin cancel
-- [ ] `UsersManagePage`: table + lock/unlock action
-- [ ] `CouponsManagePage`: CRUD table
-
----
-
-### 📅 Day 24 — Frontend: Polish + Responsive
-
-- [ ] Responsive audit: 375px / 768px / 1200px / 1440px
-- [ ] Skeleton loaders for all major data-fetching views
-- [ ] Error boundaries + custom 404/403/500 pages
-- [ ] Toast notifications for all user-facing actions
-- [ ] `React.lazy` + `Suspense` for all route pages
-- [ ] `<title>` and `<meta name="description">` per page
-
----
-
-### 📅 Day 25 — E2E Testing: 20-Scenario Checklist
-
-| # | Scenario | Pass |
-|---|----------|------|
-| 1 | Register new user | ☐ |
-| 2 | Verify email via link | ☐ |
-| 3 | Login email + password | ☐ |
-| 4 | Login Google OAuth | ☐ |
-| 5 | Browse tours with filter | ☐ |
-| 6 | View tour detail + itinerary | ☐ |
-| 7 | Favorite a tour | ☐ |
-| 8 | Create booking with coupon | ☐ |
-| 9 | Pay with VNPay (sandbox) | ☐ |
-| 10 | Pay with PayOS QR code | ☐ |
-| 11 | Receive booking confirmation email | ☐ |
-| 12 | View My Bookings — status CONFIRMED | ☐ |
-| 13 | Cancel a PENDING booking | ☐ |
-| 14 | Submit review with images | ☐ |
-| 15 | View in-app notifications | ☐ |
-| 16 | Update profile + avatar | ☐ |
-| 17 | Admin: create/edit/delete tour | ☐ |
-| 18 | Admin: view dashboard + charts | ☐ |
-| 19 | AI chatbot returns business insight | ☐ |
-| 20 | Logout-all → both tokens dead | ☐ |
-
-Fix all blocking issues.
-
----
-
-### 📅 Day 26 — Dockerize All Services
-
-**Standard `Dockerfile`** (multi-stage, used for all backend services):
+**Standard Backend Dockerfile** (multi-stage):
 ```dockerfile
 FROM maven:3.9-eclipse-temurin-17-alpine AS builder
 WORKDIR /build
+# Build common-events first (if this service depends on it)
+COPY shared-libs/common-events ./shared-libs/common-events
+RUN mvn install -f ./shared-libs/common-events/pom.xml -DskipTests -q
 
-# For services that depend on common-events:
-COPY shared-libs/common-events /build/common-events
-RUN mvn install -f /build/common-events/pom.xml -DskipTests -q
-
-COPY services/{service-name}/pom.xml .
-RUN mvn dependency:go-offline -q
-COPY services/{service-name}/src ./src
-RUN mvn package -DskipTests -q
+COPY services/{name}/pom.xml ./services/{name}/pom.xml
+RUN mvn dependency:go-offline -f ./services/{name}/pom.xml -q
+COPY services/{name}/src ./services/{name}/src
+RUN mvn package -f ./services/{name}/pom.xml -DskipTests -q
 
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
-COPY --from=builder /build/target/*.jar app.jar
-EXPOSE ${SERVER_PORT:-8080}
+COPY --from=builder /build/services/{name}/target/*.jar app.jar
+EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --retries=5 \
-    CMD wget -qO- http://localhost:${SERVER_PORT}/actuator/health || exit 1
-ENTRYPOINT ["java", \
-    "-XX:+UseContainerSupport", \
-    "-XX:MaxRAMPercentage=75.0", \
-    "-Djava.security.egd=file:/dev/./urandom", \
+    CMD wget -qO- http://localhost:8080/actuator/health || exit 1
+ENTRYPOINT ["java",
+    "-XX:+UseContainerSupport",
+    "-XX:MaxRAMPercentage=70.0",
+    "-Djava.security.egd=file:/dev/./urandom",
     "-jar", "app.jar"]
 ```
 
-**Frontend `Dockerfile`**:
+**Frontend Dockerfile**:
 ```dockerfile
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -1929,299 +1647,319 @@ FROM nginx:1.25-alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
-HEALTHCHECK CMD wget -qO- http://localhost/index.html || exit 1
+HEALTHCHECK CMD wget -qO- http://localhost || exit 1
 ```
 
-**`nginx.conf`** (SPA support):
+**nginx.conf** (SPA support):
 ```nginx
 server {
     listen 80;
     root /usr/share/nginx/html;
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;  # React Router SPA
-    }
-
-    location /api/ {
-        proxy_pass http://api-gateway:8080;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
+    location / { try_files $uri $uri/ /index.html; }
 }
 ```
 
+Tasks:
 - [ ] Dockerfile for all 10 backend services
 - [ ] Dockerfile for frontend
-- [ ] Update `docker-compose.yml` with all services + healthchecks + depends_on
-- [ ] `docker-compose up --build -d` → verify 15 containers healthy
+- [ ] Update `docker-compose.yml` with all 15 containers + health checks + `depends_on`
+- [ ] `docker-compose up --build -d` → all containers healthy
+- [ ] All 10+ services register in Eureka
 
 ---
 
-### 📅 Day 27 — Deploy AWS: EC2 Setup
+#### 📅 Day 26 — Seed Data + Final Local Verification
 
-**AWS Resources needed**:
+**`[BE]`**:
+```sql
+-- seed-data.sql
+-- Admin user (password: Admin123@)
+INSERT INTO users (email, password_hash, full_name, role, status)
+VALUES ('admin@tourism.vn', '$2a$10$...', 'Administrator', 'ADMIN', 'ACTIVE');
+
+-- 5 sample tours with departures
+-- 2 sample coupons
 ```
-EC2: t3.medium (2 vCPU, 4 GB RAM) — Ubuntu 22.04 LTS
-  → Run all 15 Docker containers (sufficient for KLTN load)
+- [ ] Run seed data against all DBs
+- [ ] Full smoke test: curl all 11 services healthcheck endpoints
+- [ ] Verify Zipkin dashboard at `:9411`
+- [ ] Export final Postman Collection v2.1
 
-Elastic IP: static IP for EC2
-Network: default VPC, Security Group:
-  Inbound:  22 (SSH, your IP only), 80 (HTTP), 443 (HTTPS)
-  Outbound: all (for Docker pulls, external APIs)
+**`[FE]`**:
+- [ ] Test complete flows with Docker (not hot reload)
+- [ ] Verify CORS from `:5173` → `:8080` works correctly
+- [ ] Test with production build: `npm run build && npx vite preview`
 
-Domain: tourism-kltn.yourdomain.com → EC2 Elastic IP
-        (use Cloudflare free tier for DNS)
+---
+
+#### 📅 Day 27 — AWS EC2 Setup + Deploy
+
+**AWS Architecture**:
+```
+EC2 t3.medium (2 vCPU, 4 GB RAM) — Ubuntu 22.04 LTS
+Elastic IP → Cloudflare DNS → tourism-kltn.yourdomain.com
+Security Group: inbound 22 (SSH your IP), 80, 443 / outbound all
 ```
 
 **EC2 Setup**:
 ```bash
-# Connect
 ssh -i kltn.pem ubuntu@<EC2_IP>
-
-# Install Docker + Docker Compose
 sudo apt update && sudo apt install -y docker.io docker-compose-v2 git nginx certbot python3-certbot-nginx
-sudo usermod -aG docker ubuntu
-newgrp docker
+sudo usermod -aG docker ubuntu && newgrp docker
 
-# Clone project
 git clone https://github.com/you/tourism-microservices-v2.git
 cd tourism-microservices-v2
-cp .env.example .env
-nano .env    # Fill in all production values
+cp .env.example .env && nano .env     # Fill all production values
+```
 
-# Update VITE_API_URL to production domain in .env
-# Update VNPay returnUrl to production URL
-# Update PayOS webhook URL to production URL
+**Update production env**:
+```bash
+# In .env — production critical changes:
+BASE_URL=https://tourism-kltn.yourdomain.com
+FRONTEND_URL=https://tourism-kltn.yourdomain.com
+VNPAY_URL=https://pay.vnpay.vn/vpcpay.html   # production VNPay
+# Update PayOS webhook URL to production domain
+# Update Google OAuth authorized origins
 ```
 
 ---
 
-### 📅 Day 28 — Deploy AWS: Run + SSL + Domain
+#### 📅 Day 28 — Deploy + SSL + Nginx
 
 **Deploy sequence**:
 ```bash
-# 1. Infrastructure first
+# Stage 1: Infrastructure
 docker compose up -d zookeeper kafka postgres redis zipkin service-registry
-sleep 45  # Wait for Eureka to be ready
+sleep 60
 
-# 2. Auth layer
+# Stage 2: Auth layer (critical path)
 docker compose up -d iam-service identity-service api-gateway
-sleep 30  # Wait for services to register
+sleep 45
 
-# 3. Business services all at once
+# Stage 3: Business services
 docker compose up -d \
-    tour-catalog-service booking-service payment-service \
-    review-service promotion-service notification-service \
-    analytics-service cms-service
+  tour-catalog-service booking-service payment-service \
+  review-service promotion-service notification-service \
+  analytics-service cms-service
 
-# 4. Frontend
+# Stage 4: Frontend
 docker compose up -d frontend
+sleep 15
 
-# 5. Verify all registered in Eureka
-curl http://localhost:8761/eureka/apps | python3 -m json.tool
+# Verify all registered in Eureka
+curl http://localhost:8761/eureka/apps | python3 -c "import sys,json; data=json.load(sys.stdin); print(f'Apps: {len(data[\"applications\"][\"application\"])}')"
 ```
 
-**Nginx reverse proxy + SSL**:
+**Nginx + SSL**:
 ```bash
-# /etc/nginx/sites-available/tourism
+sudo nano /etc/nginx/sites-available/tourism-kltn
+```
+```nginx
 server {
     listen 80;
     server_name tourism-kltn.yourdomain.com;
-
-    location /api/ {
-        proxy_pass http://localhost:8080/api/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
-
-    location / {
-        proxy_pass http://localhost:80;
-    }
+    location /api/  { proxy_pass http://localhost:8080/api/;  proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; }
+    location /      { proxy_pass http://localhost:80; }
 }
-
-sudo certbot --nginx -d tourism-kltn.yourdomain.com
-# → HTTPS enabled automatically
+```
+```bash
+sudo ln -s /etc/nginx/sites-available/tourism-kltn /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d tourism-kltn.yourdomain.com   # Auto HTTPS
 ```
 
 ---
 
-### 📅 Day 29 — Production Smoke Test + Monitoring
+#### 📅 Day 29 — Production Smoke Tests + Monitoring
 
-**Smoke Tests**:
 ```bash
 BASE=https://tourism-kltn.yourdomain.com
 
 # Public APIs
-curl $BASE/api/tours | jq '.content | length'
-curl $BASE/api/cms/policies | jq length
+curl "$BASE/api/tours" | jq '.content | length'
+curl "$BASE/api/cms/policies" | jq 'length'
 
 # Auth flow
-TOKEN=$(curl -s -X POST $BASE/api/iam/auth/login \
+TOKEN=$(curl -s -X POST "$BASE/api/iam/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@test.com","password":"Admin123@"}' \
-  | jq -r '.accessToken')
+  -d '{"email":"admin@tourism.vn","password":"Admin123@"}' | jq -r '.accessToken')
+echo "Token: ${TOKEN:0:30}..."
 
 # Protected API
-curl -H "Authorization: Bearer $TOKEN" $BASE/api/auth/profile | jq .
+curl -H "Authorization: Bearer $TOKEN" "$BASE/api/auth/profile" | jq '.email'
 
 # Admin API
-curl -H "Authorization: Bearer $TOKEN" $BASE/api/analytics/dashboard/summary | jq .
+curl -H "Authorization: Bearer $TOKEN" "$BASE/api/analytics/dashboard/summary" | jq .
 
-# Eureka
-curl http://<EC2_IP>:8761
-
-# Zipkin
-curl http://<EC2_IP>:9411/zipkin/
+# Zipkin (internal only)
+curl "http://<EC2_IP>:9411/api/v2/services"
 ```
 
-**Monitoring setup**:
-- [ ] `docker compose logs -f api-gateway` — watch gateway logs
-- [ ] Set up Zipkin trace analysis
-- [ ] Test VNPay payment in sandbox with real ngrok/domain URL
+- [ ] All 5 smoke test curl commands return expected responses
+- [ ] VNPay sandbox with production domain URL
+- [ ] PayOS sandbox webhook with production domain
+- [ ] Check `docker compose logs -f api-gateway` for any 5xx errors
+- [ ] Verify email delivery from production SMTP
 
 ---
 
-### 📅 Day 30 — Final Documentation + Handoff
+#### 📅 Day 30 — Final Documentation + Handoff
 
-- [ ] Update `README.md` with:
-  - Architecture overview + diagram
-  - Local development setup (step-by-step)
-  - Environment variables reference
-  - API base URLs per service
-  - Deploy guide
-- [ ] Export Postman Collection v2.1
-- [ ] Create seed data script: admin user + 5 sample tours + 2 coupons
-- [ ] Final `docker-compose up -d` verify — 100% healthy
-- [ ] **Git tag**: `v1.0-production`
-- [ ] Push to GitHub with complete README
+**`[BE]` + `[FE]`**:
+- [ ] `README.md` — architecture overview, local setup, env variables, API docs, screenshots
+- [ ] Update `D:\KLTN\tourism-microservices\implementation_plan.md` — mark all checkboxes done
+- [ ] Export Postman Collection v2.1 JSON
+- [ ] Take screenshots: homepage, tour detail, booking flow, admin dashboard, mobile view
+- [ ] Record 2-minute demo video (optional but recommended for thesis defense)
+- [ ] Final `git commit -m "feat: v1.0 production ready"` + `git tag v1.0-production`
+- [ ] Push to GitHub
 
 ---
 
-## 11. Frontend Architecture
+## 11. Frontend Migration Guide
 
 ### 11.1 Migration Strategy: CRA → Vite
 
-> **Existing frontend**: `D:\KLTN\client-side` (Create React App, `react-scripts 5.0.1`, TypeScript)  
-> **Target**: `D:\KLTN\tourism-microservices-v2\frontend` — Vite 5 + same stack  
-> **Approach**: **Migrate, not rewrite.** Keep all components, pages, styles. Only change auth endpoints and build tooling.
+> **Existing**: `D:\KLTN\client-side` (CRA, `react-scripts 5.0.1`, TypeScript)
+> **Target**: `tourism-microservices-v2/frontend/` (Vite 5, same UI)
+> **Approach**: **Migrate, not rewrite** — copy all components, change only:
+> 1. Build tool: CRA → Vite
+> 2. Auth endpoints: 3 URLs change (login, logout, refresh-token → IAM)
+> 3. Dashboard endpoints: `/dashboard/*` → `/analytics/dashboard/*`
 
-**What stays the same (copy directly)**:
-- All React components (17 component directories)
-- All SCSS/CSS styles
-- Business logic (tour browsing, booking flow, payment flow)
-- Redux state shape
-- React Router routes structure
-
-**What changes (after copy)**:
-| File | Change |
-|------|--------|
-| `axiosCustomize.js` → `axiosInstance.ts` | Update refresh URL: `/auth/refresh-token` → `/iam/auth/refresh-token` |
-| `AuthContext.jsx` → `AuthContext.tsx` | Update login: `/auth/login` → `/iam/auth/login` |
-| `AuthContext.jsx` → `AuthContext.tsx` | Update logout: `/auth/logout` → `/iam/auth/logout` |
-| `package.json` | Remove `react-scripts`, add `vite`, `@vitejs/plugin-react` |
-| `public/index.html` → `index.html` | Move to root level (Vite convention) |
-| `src/services/dashboard/` | Update endpoints to `/api/analytics/dashboard/*` |
-| `src/components/ChatbotWidget/` | Update endpoint to `/api/analytics/chatbot/chat` |
-
-### 11.2 Existing Frontend Component Inventory
-
-Based on `D:\KLTN\client-side\src\`:
+### 11.2 Existing Component Inventory (Keep All)
 
 ```
-client-side/src/
-├── App.tsx                  # Routes — keep exactly as-is
-├── context/
-│   └── AuthContext.jsx         # → UPDATE: login/logout/refresh URLs
-├── utils/
-│   ├── axiosCustomize.js       # → REWRITE as axiosInstance.ts
-│   └── ScrollToTop.jsx         # keep
-├── services/               # Map to Gateway endpoints
-│   ├── api.ts                  # re-export of axiosInstance (keep)
-│   ├── tours/                  # → tour-catalog-service :8082 (mostly unchanged)
-│   ├── booking/                # → booking-service :8083 (unchanged)
-│   ├── payment/                # → payment-service :8084 (unchanged)
-│   ├── review/                 # → review-service :8085 (add summary endpoint)
-│   ├── favoriteTour/           # → tour-catalog-service (unchanged)
-│   ├── location/               # → tour-catalog-service (unchanged)
-│   ├── user/                   # → identity-service :8081 (unchanged)
-│   ├── dashboard/              # → UPDATE: /analytics/dashboard/*
-│   └── websocket.js            # keep (Socket.IO/STOMP)
-├── components/
-│   ├── HeaderComponent/        # keep → add notification badge
-│   ├── FooterComponent/        # keep
-│   ├── LayoutComponent/        # keep (MainLayout)
-│   ├── homPageComponent/       # keep (HomePage)
-│   ├── toursPageComponent/     # keep (ToursPage filter+grid)
-│   ├── TourDetailComponent/    # keep (TourDetail with gallery, departures)
-│   ├── TourBookingComponent/   # keep (passenger form + coupon)
-│   ├── BookingPaymentComponent/ # keep (all payment result pages)
-│   ├── InformationComponent/   # keep (profile + bookings tabs)
-│   ├── Login/                  # → UPDATE endpoint
-│   ├── RegisterComponent/      # keep (endpoint same: /auth/register)
-│   ├── VerifyEmail/            # keep
-│   ├── AdminComponent/         # keep → UPDATE dashboard + chatbot endpoints
-│   ├── ChatbotWidget/          # → UPDATE endpoint to /analytics/chatbot/chat
-│   ├── DestinationSearchComponent/ # keep
-│   ├── Commons/                # keep (shared UI components)
-│   ├── AddBannerComponent/     # keep (admin banner management)
-│   └── ProtectedRoute.jsx      # keep
-├── dto/                     # TypeScript interfaces — keep
-├── data/                    # Static data — keep
-└── hook/                    # Custom hooks — keep
+D:\KLTN\client-side\src\components\  →  copy to  frontend/src/components/
+
+HeaderComponent/          ✅ Keep — add notification badge
+FooterComponent/          ✅ Keep
+LayoutComponent/          ✅ Keep (MainLayout with header+footer)
+homPageComponent/         ✅ Keep (HomePage with featured tours)
+toursPageComponent/       ✅ Keep (Tours list with filter sidebar)
+TourDetailComponent/      ✅ Keep (Gallery + tabs + departure table)
+TourBookingComponent/     ✅ Keep (Passenger form + coupon input)
+BookingPaymentComponent/  ✅ Keep (PaymentSuccess/Failed/Waiting/Error)
+InformationComponent/     ✅ Keep (Profile + Bookings + Change Password tabs)
+Login/                    ✅ Update: POST /iam/auth/login
+RegisterComponent/        ✅ Keep (POST /auth/register — identity-service, unchanged)
+VerifyEmail/              ✅ Keep
+AdminComponent/           ✅ Keep → UPDATE dashboard + chatbot endpoints
+ChatbotWidget/            ✅ Update: POST /analytics/chatbot/chat
+DestinationSearchComponent/ ✅ Keep
+Commons/                  ✅ Keep (shared utility components)
+AddBannerComponent/       ✅ Keep
+ProtectedRoute.jsx        ✅ Keep
 ```
 
-**New files to add** (not in monolith frontend):
-```
-src/services/notification/
-└── notificationService.ts   # GET /notifications/my, /unread-count, PUT /read
-```
+### 11.3 App.tsx Routes — Keep Exactly As-Is
 
-### 11.3 Existing Routes (App.tsx) — Keep Exactly
-
-```
-/                    → HomePage
-/tours               → ToursPage
-/information         → InformationComponent (profile + bookings)
-/information/:tab    → InformationComponent (tab-aware)
-/tour-detail         → TourDetail
-/tour/:tourCode      → TourDetail
-/order-booking       → TourBooking
-/payment-booking     → BookingPayment
-/verify-email        → VerifyEmail
-/payment-success     → PaymentSuccess
-/payment-failed      → PaymentFailed
-/payment-waiting     → PaymentWaitingPage
-/payment-error       → PaymentError
-/register            → Register
-/login               → Login
-/admin/*             → AdminComponent (nested admin routes)
+```tsx
+// All routes from client-side/src/App.tsx stay identical:
+/ → HomePage
+/tours → ToursPage
+/information → InformationComponent
+/information/:tab → InformationComponent(tab)
+/tour-detail → TourDetail
+/tour/:tourCode → TourDetail
+/order-booking → TourBooking
+/payment-booking → BookingPayment
+/verify-email → VerifyEmail
+/payment-success → PaymentSuccess
+/payment-failed → PaymentFailed
+/payment-waiting → PaymentWaitingPage
+/payment-error → PaymentError
+/register → Register
+/login → Login
+/admin/* → AdminComponent
 ```
 
-### 11.4 Existing Tech Stack (Keep Exact Versions)
+### 11.4 Key Files to Modify
 
-| Library | Version | Status |
-|---------|---------|--------|
-| React | 18.3.1 | ✅ Keep |
-| TypeScript | 4.9.5 | ✅ Keep |
-| react-router-dom | 7.8.2 | ✅ Keep |
-| axios | 1.13.2 | ✅ Keep |
-| antd | 5.29.1 | ✅ Keep |
-| @ant-design/icons | 6.1.0 | ✅ Keep |
-| react-redux | 9.2.0 | ✅ Keep |
-| @reduxjs/toolkit | 2.8.2 | ✅ Keep |
-| recharts | 3.6.0 | ✅ Keep |
-| swiper | 11.2.10 | ✅ Keep |
-| @react-oauth/google | 0.12.2 | ✅ Keep |
-| react-toastify | 11.0.5 | ✅ Keep |
-| react-quill | 2.0.0 | ✅ Keep (admin editor) |
-| react-bootstrap | 2.10.10 | ✅ Keep |
-| react-confetti | 6.4.0 | ✅ Keep (payment success) |
-| dvhcvn | 1.2.x | ✅ Keep (VN address picker) |
-| lucide-react | 0.542.0 | ✅ Keep |
-| react-scripts | 5.0.1 | ❌ **Remove** |
-| vite | 5.x | ✅ **Add** (replaces react-scripts) |
-| @vitejs/plugin-react | 4.x | ✅ **Add** |
+**`src/utils/axiosInstance.ts`** (rewrite from `axiosCustomize.js`):
+
+```typescript
+import axios, { InternalAxiosRequestConfig } from 'axios';
+
+const BASE_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:8080'}/api`;
+
+const instance = axios.create({ baseURL: BASE_URL, timeout: 30000 });
+
+instance.interceptors.request.use(
+    (config: InternalAxiosRequestConfig) => {
+        const token = localStorage.getItem('accessToken');
+        if (token) config.headers.Authorization = `Bearer ${token}`;
+        return config;
+    }
+);
+
+instance.interceptors.response.use(
+    (res) => res,
+    async (error) => {
+        const orig = error.config;
+        if (error.response?.status === 401 && !orig._retry) {
+            orig._retry = true;
+            try {
+                const refreshToken = localStorage.getItem('refreshToken');
+                if (!refreshToken) throw new Error('no refresh token');
+                const res = await axios.post(`${BASE_URL}/iam/auth/refresh-token`, { refreshToken });
+                // ☝️ KEY CHANGE: was /auth/refresh-token
+                localStorage.setItem('accessToken', res.data.accessToken);
+                if (res.data.refreshToken) localStorage.setItem('refreshToken', res.data.refreshToken);
+                orig.headers.Authorization = `Bearer ${res.data.accessToken}`;
+                return instance(orig);
+            } catch {
+                localStorage.clear();
+                window.location.href = '/login';
+            }
+        }
+        return Promise.reject(error);
+    }
+);
+
+export default instance;
+```
+
+**`src/context/AuthContext.tsx`** — Only 3 lines change:
+
+```typescript
+// ① Login — was: POST /auth/login
+const response = await axios.post('/iam/auth/login', { email, password });
+
+// ② Logout — was: POST /auth/logout
+await axios.post('/iam/auth/logout', {}, {
+    headers: { Authorization: `Bearer ${localStorage.getItem('accessToken')}` }
+});
+
+// ③ Refresh — was: POST /auth/refresh-token
+const response = await axios.post('/iam/auth/refresh-token', { refreshToken });
+
+// ✅ Google login stays unchanged:
+const response = await axios.post('/auth/google/login', { idToken }); // identity-service
+```
+
+**New `src/services/notification/notificationService.ts`**:
+```typescript
+import api from '../../utils/axiosInstance';
+
+export const notificationService = {
+    getMyNotifications: (page = 0, size = 20) =>
+        api.get(`/notifications/my?page=${page}&size=${size}`),
+    getUnreadCount: () =>
+        api.get('/notifications/unread-count'),
+    markAsRead: (id: number) =>
+        api.put(`/notifications/${id}/read`),
+    markAllAsRead: () =>
+        api.put('/notifications/read-all'),
+};
+```
+
+**Update `src/services/dashboard/`** (change all paths):
+```typescript
+// was: GET /dashboard/statistics    →  now: GET /analytics/dashboard/summary
+// was: GET /dashboard/ai-analysis   →  now: GET /analytics/dashboard/daily-stats
+// was: GET /dashboard/top-tours     →  now: GET /analytics/dashboard/top-tours
+```
 
 ### 11.5 vite.config.ts
 
@@ -2231,252 +1969,46 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 
 export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: { '@': path.resolve(__dirname, 'src') }
-  },
-  server: {
-    port: 5173,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        // Proxy /api to API Gateway during development
-        // Eliminates CORS issues for local dev
-      }
-    }
-  },
-  define: {
-    // CRA uses process.env, Vite uses import.meta.env
-    // Replace any process.env.REACT_APP_* with import.meta.env.VITE_*
-    'process.env': {}
-  }
-});
-```
-
-### 11.6 axiosInstance.ts (Updated from axiosCustomize.js)
-
-Key differences from existing `axiosCustomize.js`:
-1. `BASE_URL` now reads `import.meta.env.VITE_API_URL` (Vite) instead of hardcoded
-2. Refresh token URL: `/auth/refresh-token` → `/iam/auth/refresh-token`
-3. TypeScript types added
-4. Remove debug console.log statements
-
-```typescript
-import axios, { InternalAxiosRequestConfig } from 'axios';
-
-const BASE_URL = import.meta.env.VITE_API_URL
-    ? `${import.meta.env.VITE_API_URL}/api`
-    : 'http://localhost:8080/api';
-
-const instance = axios.create({
-    baseURL: BASE_URL,
-    timeout: 30000,
-});
-
-instance.interceptors.request.use(
-    (config: InternalAxiosRequestConfig) => {
-        const token = localStorage.getItem('accessToken');
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
-        }
-        return config;
+    plugins: [react()],
+    resolve: {
+        alias: { '@': path.resolve(__dirname, 'src') }
     },
-    (error) => Promise.reject(error)
-);
-
-instance.interceptors.response.use(
-    (response) => response,
-    async (error) => {
-        const originalRequest = error.config;
-
-        if (error.response?.status === 401 && !originalRequest._retry) {
-            originalRequest._retry = true;
-
-            try {
-                const refreshToken = localStorage.getItem('refreshToken');
-                if (!refreshToken) throw new Error('No refresh token available');
-
-                // ✅ Updated: calls IAM service (was /auth/refresh-token)
-                const response = await axios.post(
-                    `${BASE_URL}/iam/auth/refresh-token`,
-                    { refreshToken },
-                    { headers: { 'Content-Type': 'application/json' } }
-                );
-
-                const { accessToken, refreshToken: newRefreshToken } = response.data;
-                localStorage.setItem('accessToken', accessToken);
-                if (newRefreshToken) {
-                    localStorage.setItem('refreshToken', newRefreshToken);
-                }
-
-                originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-                return instance(originalRequest);
-
-            } catch (refreshError) {
-                localStorage.removeItem('accessToken');
-                localStorage.removeItem('refreshToken');
-                localStorage.removeItem('user');
-                window.location.href = '/login';
-                return Promise.reject(refreshError);
+    server: {
+        port: 5173,
+        proxy: {
+            '/api': {
+                target: 'http://localhost:8080',
+                changeOrigin: true,
+                // Dev proxy: eliminates CORS entirely during development
             }
         }
-
-        return Promise.reject(error);
+    },
+    define: {
+        'process.env': {}  // Fix any remaining process.env references
     }
-);
-
-export default instance;
-```
-
-### 11.7 Frontend `.env` File
-
-```bash
-# .env (for local development)
-VITE_API_URL=http://localhost:8080
-VITE_GOOGLE_CLIENT_ID=your-google-client-id
-
-# .env.production (for Docker build)
-VITE_API_URL=https://tourism-kltn.yourdomain.com
-VITE_GOOGLE_CLIENT_ID=your-google-client-id
-```
-
-### 11.2 Directory Structure
-
-```
-tourism-frontend-v2/src/
-├── api/
-│   ├── axiosInstance.ts     # Base axios + JWT interceptor + auto-refresh
-│   ├── iam.api.ts           # → /api/iam/auth/**
-│   ├── auth.api.ts          # → /api/auth/** (identity-service)
-│   ├── tours.api.ts         # → /api/tours/**
-│   ├── bookings.api.ts      # → /api/bookings/**
-│   ├── payments.api.ts      # → /api/payments/**
-│   ├── reviews.api.ts       # → /api/reviews/**
-│   ├── promotions.api.ts    # → /api/promotions/**
-│   ├── notifications.api.ts # → /api/notifications/**
-│   ├── analytics.api.ts     # → /api/analytics/**
-│   └── cms.api.ts           # → /api/cms/**
-│
-├── store/
-│   ├── index.ts
-│   ├── auth/authSlice.ts    # { user, accessToken, isAuthenticated }
-│   └── ui/uiSlice.ts        # { loading, modals }
-│
-├── pages/
-│   ├── public/
-│   │   ├── HomePage.tsx
-│   │   ├── ToursPage.tsx
-│   │   └── TourDetailPage.tsx
-│   ├── auth/
-│   │   ├── LoginPage.tsx
-│   │   ├── RegisterPage.tsx
-│   │   └── VerifyEmailPage.tsx
-│   ├── user/
-│   │   ├── BookingsPage.tsx
-│   │   ├── ProfilePage.tsx
-│   │   └── NotificationsPage.tsx
-│   ├── booking/
-│   │   ├── BookingFormPage.tsx
-│   │   ├── PaymentPage.tsx
-│   │   └── PaymentResultPage.tsx
-│   └── admin/
-│       ├── DashboardPage.tsx
-│       ├── ToursManagePage.tsx
-│       ├── BookingsManagePage.tsx
-│       ├── CouponsManagePage.tsx
-│       └── UsersManagePage.tsx
-│
-├── components/
-│   ├── layout/
-│   │   ├── PublicLayout.tsx    # Header (nav, auth, notifications) + Footer
-│   │   └── AdminLayout.tsx     # Sidebar + Header
-│   ├── common/
-│   │   ├── ProtectedRoute.tsx  # Check isAuthenticated
-│   │   └── AdminRoute.tsx      # Check role === 'ADMIN'
-│   ├── tour/
-│   │   ├── TourCard.tsx
-│   │   ├── TourGallery.tsx     # Swiper lightbox
-│   │   └── DepartureTable.tsx
-│   ├── booking/
-│   │   ├── PassengerForm.tsx
-│   │   └── BookingCard.tsx
-│   ├── review/
-│   │   ├── ReviewList.tsx
-│   │   ├── RatingSummary.tsx
-│   │   └── WriteReviewModal.tsx
-│   └── admin/
-│       └── ChatbotWidget.tsx   # Floating chatbot
-│
-└── types/                      # All TypeScript interfaces
-    ├── auth.types.ts
-    ├── tour.types.ts
-    ├── booking.types.ts
-    └── ...
-```
-
-### 11.3 axiosInstance.ts
-
-```typescript
-import axios from 'axios';
-import { store } from '../store';
-import { logout, setAccessToken } from '../store/auth/authSlice';
-
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8080',
-  timeout: 15000,
 });
-
-// Attach Bearer token
-api.interceptors.request.use((config) => {
-  const token = store.getState().auth.accessToken;
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
-
-// Auto-refresh on 401
-let isRefreshing = false;
-let failedQueue: Array<{ resolve: Function; reject: Function }> = [];
-
-api.interceptors.response.use(
-  (res) => res,
-  async (error) => {
-    if (error.response?.status === 401 && !error.config._retry) {
-      if (isRefreshing) {
-        return new Promise((resolve, reject) =>
-          failedQueue.push({ resolve, reject })
-        ).then((token) => {
-          error.config.headers.Authorization = `Bearer ${token}`;
-          return api(error.config);
-        });
-      }
-      error.config._retry = true;
-      isRefreshing = true;
-      try {
-        const refreshToken = localStorage.getItem('refreshToken');
-        const { data } = await axios.post(
-          `${api.defaults.baseURL}/api/iam/auth/refresh-token`,
-          { refreshToken }
-        );
-        store.dispatch(setAccessToken(data.accessToken));
-        localStorage.setItem('refreshToken', data.refreshToken);
-        failedQueue.forEach(({ resolve }) => resolve(data.accessToken));
-        return api(error.config);
-      } catch {
-        store.dispatch(logout());
-        localStorage.removeItem('refreshToken');
-        return Promise.reject(error);
-      } finally {
-        isRefreshing = false;
-        failedQueue = [];
-      }
-    }
-    return Promise.reject(error);
-  }
-);
-
-export default api;
 ```
+
+### 11.6 Tech Stack (Exact Versions from client-side/package.json)
+
+| Library | Version | Status |
+|---------|---------|--------|
+| React | 18.3.1 | ✅ Keep |
+| TypeScript | 4.9.5 | ✅ Keep |
+| react-router-dom | 7.8.2 | ✅ Keep |
+| axios | 1.13.2 | ✅ Keep |
+| antd | 5.29.1 | ✅ Keep |
+| react-redux + RTK | 9.2.0 + 2.8.2 | ✅ Keep |
+| recharts | 3.6.0 | ✅ Keep |
+| swiper | 11.2.10 | ✅ Keep |
+| @react-oauth/google | 0.12.2 | ✅ Keep |
+| react-toastify | 11.0.5 | ✅ Keep |
+| react-quill | 2.0.0 | ✅ Keep (admin editor) |
+| react-bootstrap | 2.10.10 | ✅ Keep |
+| react-confetti | 6.4.0 | ✅ Keep (payment success) |
+| dvhcvn | 1.2.x | ✅ Keep (VN address) |
+| react-scripts | 5.0.1 | ❌ Remove |
+| vite + plugin-react | 5.x + 4.x | ✅ Add |
 
 ---
 
@@ -2486,151 +2018,128 @@ export default api;
 
 ```
 Internet
-    │
-    ▼
-Cloudflare (DNS + DDoS protection — Free)
-    │  tourism-kltn.yourdomain.com → EC2 Elastic IP
-    ▼
-Nginx on EC2 (reverse proxy + SSL via Let's Encrypt)
-    ├── /api/* → localhost:8080 (API Gateway container)
-    └── /*     → localhost:80  (Frontend Nginx container)
-         │
-    EC2 t3.medium (Ubuntu 22.04)
-    Docker Compose: 15 containers
-         │
-    ┌────┴────────────────────────────────┐
-    │  PostgreSQL (single instance)        │
-    │  Redis                               │
-    │  Kafka + Zookeeper                   │
-    │  Zipkin                              │
-    │  Eureka (service-registry)           │
-    │  api-gateway                         │
-    │  iam-service                         │
-    │  identity-service                    │
-    │  tour-catalog-service                │
-    │  booking-service                     │
-    │  payment-service                     │
-    │  review-service                      │
-    │  promotion-service                   │
-    │  notification-service                │
-    │  analytics-service                   │
-    │  cms-service                         │
-    │  frontend (Nginx)                    │
-    └─────────────────────────────────────┘
+  │
+  ▼
+Cloudflare (DNS + Free CDN)
+  │  tourism-kltn.yourdomain.com → EC2 Elastic IP
+  ▼
+Nginx (SSL termination via Let's Encrypt)
+  ├── /api/*  → http://localhost:8080  (API Gateway container)
+  └── /*      → http://localhost:80   (Frontend Nginx container)
+       │
+  EC2 t3.medium (Ubuntu 22.04)
+  Docker Compose — 15 containers:
+    ├── Infrastructure: postgres, redis, kafka, zookeeper, zipkin, service-registry
+    ├── Auth: iam-service, identity-service, api-gateway
+    ├── Business: tour-catalog, booking, payment, review, promotion, notification, analytics, cms
+    └── Frontend: nginx serving React SPA
 ```
 
-### 12.2 Cost Estimate (1 month, KLTN demo)
+### 12.2 Cost Estimate (1 month)
 
-| Resource | Config | Cost/Month |
-|----------|--------|-----------|
-| EC2 t3.medium | On-Demand | ~$30 |
-| Elastic IP | 1 address | ~$4 |
-| EBS (30 GB gp3) | Storage | ~$2 |
-| CloudFront/Cloudflare | Free tier | $0 |
-| Let's Encrypt SSL | Free | $0 |
+| Resource | Config | Cost |
+|----------|--------|------|
+| EC2 t3.medium | On-Demand | ~$30/mo |
+| Elastic IP | 1 static IP | ~$4/mo |
+| EBS 30GB gp3 | Storage | ~$2/mo |
+| Cloudflare | Free tier | $0 |
+| Let's Encrypt | Free | $0 |
 | **Total** | | **~$36/month** |
 
-> 💡 Use `t3.small` (~$15/month) if memory is not an issue — set JVM flags to limit Spring Boot memory usage per service.
-
-### 12.3 JVM Optimization for Multi-Service EC2
-
-```dockerfile
-# In each service Dockerfile ENTRYPOINT:
-ENTRYPOINT ["java",
-    "-XX:+UseContainerSupport",
-    "-XX:MaxRAMPercentage=60.0",    # Each service uses max 60% of its container limit
-    "-XX:InitialRAMPercentage=25.0",
-    "-Xss512k",                      # Reduce stack size
-    "-Djava.security.egd=file:/dev/./urandom",
-    "-jar", "app.jar"]
-```
+### 12.3 Memory Management (t3.medium = 4 GB)
 
 ```yaml
-# docker-compose.yml — memory limits per service
-deploy:
-  resources:
-    limits:
-      memory: 512m    # Most services
-    # iam-service, identity-service: 256m
-    # analytics-service: 768m (Gemini API calls)
+# docker-compose.yml — resource limits
+services:
+  iam-service:      { deploy: { resources: { limits: { memory: 256m } } } }
+  identity-service: { deploy: { resources: { limits: { memory: 256m } } } }
+  api-gateway:      { deploy: { resources: { limits: { memory: 384m } } } }
+  tour-catalog-service: { deploy: { resources: { limits: { memory: 384m } } } }
+  booking-service:  { deploy: { resources: { limits: { memory: 256m } } } }
+  payment-service:  { deploy: { resources: { limits: { memory: 256m } } } }
+  review-service:   { deploy: { resources: { limits: { memory: 256m } } } }
+  promotion-service: { deploy: { resources: { limits: { memory: 192m } } } }
+  notification-service: { deploy: { resources: { limits: { memory: 256m } } } }
+  analytics-service: { deploy: { resources: { limits: { memory: 384m } } } }
+  cms-service:      { deploy: { resources: { limits: { memory: 192m } } } }
+  postgres:         { deploy: { resources: { limits: { memory: 512m } } } }
+  redis:            { deploy: { resources: { limits: { memory: 128m } } } }
+  kafka:            { deploy: { resources: { limits: { memory: 512m } } } }
+  # Total: ~3.5 GB (comfortable on t3.medium 4 GB)
 ```
 
 ---
 
 ## 13. Risk Register
 
-| Risk | Probability | Impact | Mitigation |
-|------|-------------|--------|------------|
-| IAM Service becomes bottleneck | Medium | High | Caffeine cache in Gateway (60s TTL) reduces IAM calls by ~90% |
-| Feign circular dependency | Medium | High | Use `@Lazy` injection; convert one direction to Kafka |
-| Kafka consumer deserialization error | Medium | Medium | Add `spring.json.trusted.packages`, use `auto-offset-reset=earliest` |
-| VNPay/PayOS webhook unreachable locally | High | High | Use `ngrok http 8080` → update sandbox webhook URLs |
-| Slot race condition on booking | Medium | High | `@Transactional` + `UPDATE slots WHERE id=? AND slots >= ?` pessimistic lock |
-| Redis connection fails | Low | Medium | Use Docker service name `redis:6379`, not `localhost` |
-| JWT_SECRET distributed to wrong service | Low | Critical | Only `iam-service` and `api-gateway` have JWT_SECRET in `.env` |
-| EC2 OOM (15 containers) | Medium | High | Set `deploy.resources.limits.memory` per container; use t3.medium min |
-| CORS rejection FE → Gateway | Medium | High | `allowed-origins: http://localhost:5173` in gateway CORS config |
-| Logout doesn't work within 60s (cache) | Low | Low | Acceptable for KLTN; production would use shorter TTL or event-driven cache invalidation |
+| Risk | P | I | Mitigation |
+|------|---|---|------------|
+| IAM Service bottleneck | M | H | Caffeine cache at Gateway (60s TTL) → 90% calls cached |
+| Feign circular dependency | M | H | Use `@Lazy` injection; convert one direction to Kafka event |
+| Kafka consumer lag / deserialization error | M | M | `spring.json.trusted.packages=com.tourism.events`; `auto-offset-reset=earliest` |
+| VNPay/PayOS unreachable webhook locally | H | H | `ngrok http 8080`; update sandbox webhook URLs before testing |
+| Slot race condition | M | H | `@Lock(PESSIMISTIC_WRITE)` on TourDeparture; `UPDATE slots WHERE id=? AND slots >= ?` |
+| Redis not reachable from service | L | M | Use Docker service name `redis:6379`, never `localhost` inside compose |
+| JWT_SECRET leak | L | C | `.env` git-ignored; `JWT_SECRET` only in `iam-service` + `api-gateway` |
+| EC2 OOM kill | M | H | Set `deploy.resources.limits.memory` per container; monitor with `docker stats` |
+| CORS rejection | M | H | Gateway CORS: `allowed-origins` includes `:5173` and production domain |
+| CRA → Vite `process.env` errors | M | M | Add `define: { 'process.env': {} }` in vite.config.ts |
+| 401 loop (refresh fails) | L | M | Check `_retry` flag in interceptor; `localStorage.clear()` on refresh failure |
 
 ---
 
 ## 14. Completion Checklist
 
 ### Infrastructure
-
-- [ ] `docker-compose.yml` — 15 containers with healthchecks
-- [ ] `init-db.sql` — 10 database created
-- [ ] API Gateway — JWT filter + IAM call + Caffeine cache + CORS
+- [ ] `docker-compose.yml` — 15 containers healthy
+- [ ] `init-db.sql` — 10 databases created
+- [ ] API Gateway — JWT filter + IAM + Caffeine cache + CORS
 - [ ] Eureka — all 10 services registered
-- [ ] Zipkin — distributed traces visible
-- [ ] Kafka — 6 topics flowing with no consumer lag
-- [ ] Redis — blacklist + booking cache working
+- [ ] Zipkin — traces flowing across services
+- [ ] Kafka — 6 topics, consumer lag = 0
+- [ ] Redis — IAM blacklist + booking cache operational
 
 ### Backend Services
 
-| Service | DB | APIs | Feign | Kafka | Tests | Docker |
-|---------|-----|------|-------|-------|-------|--------|
-| iam-service | ☐ | ☐ | ☐ | — | ☐ | ☐ |
-| identity-service | ☐ | ☐ | ☐ | Prod | ☐ | ☐ |
-| tour-catalog-service | ☐ | ☐ | — | — | ☐ | ☐ |
-| booking-service | ☐ | ☐ | ☐ | Prod | ☐ | ☐ |
-| payment-service | ☐ | ☐ | ☐ | Prod | ☐ | ☐ |
-| review-service | ☐ | ☐ | ☐ | Prod | ☐ | ☐ |
-| promotion-service | ☐ | ☐ | — | — | ☐ | ☐ |
-| notification-service | ☐ | ☐ | — | Cons | ☐ | ☐ |
-| analytics-service | ☐ | ☐ | — | Cons | ☐ | ☐ |
-| cms-service | ☐ | ☐ | — | — | ☐ | ☐ |
+| Service | Schema | APIs | Tests | Docker |
+|---------|--------|------|-------|--------|
+| iam-service | ☐ | ☐ | ☐ | ☐ |
+| identity-service | ☐ | ☐ | ☐ | ☐ |
+| tour-catalog-service | ☐ | ☐ | ☐ | ☐ |
+| booking-service | ☐ | ☐ | ☐ | ☐ |
+| payment-service | ☐ | ☐ | ☐ | ☐ |
+| review-service | ☐ | ☐ | ☐ | ☐ |
+| promotion-service | ☐ | ☐ | ☐ | ☐ |
+| notification-service | ☐ | ☐ | ☐ | ☐ |
+| analytics-service | ☐ | ☐ | ☐ | ☐ |
+| cms-service | ☐ | ☐ | ☐ | ☐ |
 
-### Frontend
+### Frontend Migration (from `D:\KLTN\client-side`)
 
-- [ ] Auth (Login + Register + Email Verify + Google OAuth)
-- [ ] Token management (IAM refresh, memory storage, auto-retry)
-- [ ] Public pages (Home + Tours + Tour Detail + Locations)
-- [ ] User pages (My Bookings + Profile + Notifications)
-- [ ] Booking flow (Form → Payment → Result)
-- [ ] Review (read/write + images)
-- [ ] Admin Dashboard (stats + charts + chatbot)
-- [ ] Admin Management (Tour CRUD + Booking + User + Coupon)
-- [ ] Responsive (375px → 1440px)
-- [ ] Error boundaries + skeleton loading
-- [ ] E2E 20-scenario checklist PASS
+- [ ] Vite project created + all deps installed
+- [ ] All 17 component directories copied from client-side
+- [ ] `axiosInstance.ts` — refresh URL updated to `/iam/auth/refresh-token`
+- [ ] `AuthContext.tsx` — login/logout URLs updated to IAM
+- [ ] Dashboard service — endpoints updated to `/analytics/dashboard/*`
+- [ ] ChatbotWidget — endpoint updated to `/analytics/chatbot/chat`
+- [ ] Notification service added (`notificationService.ts`)
+- [ ] Notification badge added to HeaderComponent
+- [ ] All 25 E2E scenarios PASS in browser
+- [ ] Responsive (375px / 768px / 1440px) verified
+- [ ] Production build successful (`npm run build`)
 
 ### Deployment
-
-- [ ] All Dockerfiles built successfully
-- [ ] EC2 instance running (t3.medium)
-- [ ] Domain configured (Cloudflare)
-- [ ] SSL certificate (Let's Encrypt via Certbot)
-- [ ] Production environment variables set
-- [ ] VNPay/PayOS webhook URLs updated to production domain
-- [ ] Production smoke tests PASS (4 curl tests)
-- [ ] Git tag `v1.0-production` pushed
+- [ ] EC2 running (t3.medium Ubuntu 22.04)
+- [ ] Domain configured (Cloudflare → EC2 Elastic IP)
+- [ ] SSL certificate active (Let's Encrypt)
+- [ ] All 5 production smoke tests PASS
+- [ ] VNPay + PayOS webhook URLs updated to production domain
+- [ ] `git tag v1.0-production` pushed
 
 ---
 
-> **Tech Stack Summary**:
-> Java 17 · Spring Boot 3.3 · Spring Cloud 2023.0.2 · PostgreSQL 15 · Redis 7 · Apache Kafka 3.5 · React 18 · Vite 5 · TypeScript · Ant Design 5 · Docker · AWS EC2
+> **Stack**: Java 17 · Spring Boot 3.3 · Spring Cloud 2023.0.2 · PostgreSQL 15 · Redis 7 · Kafka 3.5 · React 18 · Vite 5 · TypeScript · Ant Design 5 · Docker · AWS EC2
 >
-> **Project**: `D:\KLTN\tourism-microservices-v2`  
-> **Source analysis**: `D:\KLTN\Tourism_Backend` (22 controllers, 23 entities)  
-> **Reference docs**: `D:\KLTN\Tourism_Backend\TLCN_FinalReport.docx`
+> **Monolith**: `D:\KLTN\Tourism_Backend` — 22 controllers, 23 entities
+> **Frontend base**: `D:\KLTN\client-side` — CRA → Vite migration, all UI kept
+> **Target project**: `D:\KLTN\tourism-microservices-v2`
