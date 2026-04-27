@@ -1,10 +1,3 @@
-# 📐 Tourism Microservices — Tài Liệu Chi Tiết Kỹ Thuật
-
-> **Phiên bản:** v4 — 5 Business Services  
-> **Stack:** Java 17 · Spring Boot 3.3.0 · Spring Cloud 2023.0.2 · PostgreSQL 16 · Docker Compose  
-> **Tài liệu tổng quan:** [OVERVIEW.md](./OVERVIEW.md)
-
----
 
 ## 1. Cấu Trúc Project
 
